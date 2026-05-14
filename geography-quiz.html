@@ -65,12 +65,6 @@
 
   #zoom-hint { position: absolute; left: 12px; bottom: 12px; font-size: 11px; color: rgba(0,0,0,0.4); pointer-events: none; }
 
-  #tooltip {
-    position: absolute; background: rgba(0,0,0,0.72); color: #fff;
-    font-size: 12px; padding: 4px 10px; border-radius: 6px;
-    pointer-events: none; display: none; z-index: 10; white-space: nowrap;
-  }
-
   #scoreboard {
     position: absolute; inset: 0; background: rgba(255,255,255,0.97);
     border-radius: 12px; display: none; flex-direction: column;
@@ -150,7 +144,6 @@
       <button class="zoom-btn" id="zoom-reset" title="Reset view" style="font-size:13px">⌂</button>
     </div>
     <div id="zoom-hint">Scroll to zoom · Drag to pan</div>
-    <div id="tooltip"></div>
     <div id="scoreboard">
       <h2 id="final-title">Quiz complete!</h2>
       <div id="score-big">0</div>
@@ -239,7 +232,8 @@ const COUNTRIES = {
   '192':'Cuba','214':'Dominican Rep.','218':'Ecuador','222':'El Salvador',
   '320':'Guatemala','328':'Guyana','332':'Haiti','340':'Honduras',
   '388':'Jamaica','484':'Mexico','558':'Nicaragua','591':'Panama',
-  '600':'Paraguay','604':'Peru','740':'Suriname','780':'Trinidad and Tobago',
+  '600':'Paraguay','604':'Peru','630':'Puerto Rico',
+  '740':'Suriname','780':'Trinidad and Tobago',
   '840':'United States','858':'Uruguay','862':'Venezuela',
   // Europe
   '008':'Albania','040':'Austria','112':'Belarus','056':'Belgium',
@@ -289,10 +283,10 @@ const COUNTRIES = {
 let mode = 'click', region = 'All';
 let score = 0, round = 0, streak = 0, attempts = 0;
 let currentId = '', questionPool = [], geoIndex = {}, gameOver = false;
+let pendingTimeout = null;
 
 const mapWrap = document.getElementById('map-wrap');
 const svgEl   = document.getElementById('world-svg');
-const tooltip = document.getElementById('tooltip');
 let W, H, projection, pathGen, zoomBehavior, mapGroup;
 
 function initMap() {
@@ -423,8 +417,6 @@ async function loadMap() {
       .datum(f)
       .attr('class', 'country')
       .attr('d', pathGen)
-      .on('mousemove', () => { tooltip.style.display = 'none'; })
-      .on('mouseleave', () => { tooltip.style.display = 'none'; })
       .on('click', (event) => { event.stopPropagation(); handleMapClick(id); });
 
     geoIndex[id] = { name, path, feature: f };
@@ -466,6 +458,7 @@ function setRegion(r) {
 }
 
 function startGame() {
+  clearTimeout(pendingTimeout); pendingTimeout = null;
   score = 0; round = 0; streak = 0; attempts = 0; gameOver = false;
   const pool = region === 'All'
     ? Object.keys(COUNTRIES)
@@ -528,11 +521,97 @@ function handleMapClick(id) {
   }
 }
 
+// ── Name matching ─────────────────────────────────────────────────────────────
+// Explicit aliases: shorthand names, common alternate spellings, old names.
+// Keys are canonical IDs; values are lowercase normalised strings.
+const ALIASES = {
+  '840': ['usa', 'us', 'america', 'united states of america'],
+  '826': ['uk', 'britain', 'great britain', 'england'],
+  '180': ['drc', 'democratic republic of congo', 'congo kinshasa', 'congo-kinshasa'],
+  '178': ['republic of congo', 'congo brazzaville', 'congo-brazzaville'],
+  '384': ['ivory coast', "cote divoire"],
+  '203': ['czech republic'],
+  '807': ['macedonia'],
+  '070': ['bosnia'],
+  '140': ['car', 'central african republic'],
+  '598': ['png', 'papua new guinea'],
+  '626': ['east timor', 'timor'],
+  '780': ['trinidad'],
+  '410': ['korea', 'south korea'],  // default "Korea" → South Korea
+  '504': ['morroco', 'maroc'],      // common misspellings
+  '630': ['porto rico'],
+};
+
+// Strip accents and lower-case for comparison
+function normaliseGuess(s) {
+  return s.toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // strip diacritics
+    .replace(/[.\-']/g, ' ')                            // punctuation → space
+    .replace(/\s+/g, ' ').trim();
+}
+
+// Optimal String Alignment distance (like Levenshtein + transpositions cost 1)
+function osa(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({length: m+1}, (_, i) => Array.from({length: n+1}, (_, j) => i ? j ? 0 : i : j));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i-1] === b[j-1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+cost);
+      if (i > 1 && j > 1 && a[i-1] === b[j-2] && a[i-2] === b[j-1])
+        dp[i][j] = Math.min(dp[i][j], dp[i-2][j-2] + cost);
+    }
+  }
+  return dp[m][n];
+}
+
+// Max edit distance allowed, scaled by name length.
+// Short names (≤4 chars: Iran, Iraq, Chad, Mali…) require exact match — too
+// many near-neighbours exist. Longer names allow one or two edits.
+function fuzzyThreshold(name) {
+  const n = name.length;
+  if (n <= 4) return 0;
+  if (n <= 7) return 1;
+  return 2;
+}
+
+// Returns true if guess should be accepted for targetId.
+// Combines: exact match, aliases, and uniqueness-gated OSA fuzzy matching.
+function isCorrectGuess(guess, targetId) {
+  const g = normaliseGuess(guess);
+  const canonical = normaliseGuess(COUNTRIES[targetId]);
+
+  // 1. Exact match (after normalisation)
+  if (g === canonical) return true;
+
+  // 2. Alias match
+  if ((ALIASES[targetId] || []).includes(g)) return true;
+
+  // 3. Fuzzy match — only if the guess is NOT an exact match for any *other* country
+  //    or alias (uniqueness gate prevents Gambia↔Zambia, Iceland↔Ireland false-accepts)
+  const thresh = fuzzyThreshold(canonical);
+  if (thresh === 0) return false;
+
+  const dToTarget = osa(g, canonical);
+  if (dToTarget > thresh) return false;
+
+  // Reject if any other country is equally close or closer
+  for (const [id, name] of Object.entries(COUNTRIES)) {
+    if (id === targetId) continue;
+    if (osa(g, normaliseGuess(name)) <= dToTarget) return false;
+    // Also check that aliases of other countries aren't at least as close
+    for (const alias of (ALIASES[id] || [])) {
+      if (osa(g, alias) <= dToTarget) return false;
+    }
+  }
+  return true;
+}
+
 function checkName() {
   if (mode !== 'name' || gameOver) return;
   const val = document.getElementById('guess-input').value.trim();
   if (!val) return;
-  if (val.toLowerCase() === COUNTRIES[currentId].toLowerCase()) {
+  if (isCorrectGuess(val, currentId)) {
     if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country correct');
     awardCorrect(currentId);
   } else {
@@ -553,7 +632,7 @@ function awardCorrect(id) {
   if (streak >= 3) { bonus = Math.floor(streak/3); score += bonus; }
   setFeedback(`✓ Correct! +${pts} pts${bonus > 0 ? ' +'+bonus+' streak bonus!' : ''}`, 'ok');
   updateHUD();
-  setTimeout(nextRound, 1000);
+  pendingTimeout = setTimeout(nextRound, 1000);
 }
 
 function markFail() {
@@ -561,7 +640,7 @@ function markFail() {
   if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
   setFeedback(`It was ${COUNTRIES[currentId]}`, 'bad');
   updateHUD();
-  setTimeout(nextRound, 1600);
+  pendingTimeout = setTimeout(nextRound, 1600);
 }
 
 function skipQuestion() {
@@ -569,7 +648,7 @@ function skipQuestion() {
   if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
   setFeedback(`Skipped — it was ${COUNTRIES[currentId]}`, 'bad');
   updateHUD();
-  setTimeout(nextRound, 1600);
+  pendingTimeout = setTimeout(nextRound, 1600);
 }
 
 function endGame() {
