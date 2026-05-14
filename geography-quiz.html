@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>World Geography Quiz</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f5f5f0; color: #1a1a1a; min-height: 100vh; }
+  #app { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 1rem; }
+
+  #mode-bar { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; }
+  .mode-btn { padding: 8px 18px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 13px; }
+  .mode-btn.active { background: #1d9e75; color: #fff; border-color: transparent; }
+
+  #hud { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
+  .stat { background: #fff; border: 1px solid #e0dfd8; border-radius: 8px; padding: 6px 14px; font-size: 13px; color: #666; }
+  .stat span { font-weight: 600; color: #1a1a1a; font-size: 15px; }
+  .life-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #63b022; margin: 0 2px; vertical-align: middle; }
+  .life-dot.lost { background: #e24b4a; }
+
+  #prompt-box { background: #fff; border: 1px solid #e0dfd8; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 0.75rem; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #prompt-text { font-size: 15px; flex: 1; line-height: 1.5; }
+  .badge { font-size: 12px; padding: 3px 10px; border-radius: 20px; background: #e1f5ee; color: #0f6e56; font-weight: 500; white-space: nowrap; }
+
+  #map-wrap {
+    position: relative;
+    border: 1px solid #e0dfd8;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #d4eaf7;
+    margin-bottom: 0.75rem;
+    height: 520px;
+    cursor: grab;
+    user-select: none;
+  }
+  #map-wrap.dragging { cursor: grabbing; }
+  #world-svg { width: 100%; height: 100%; display: block; }
+
+  .country-bg { fill: #b0a898; stroke: #fff; stroke-width: 0.5px; pointer-events: none; }
+  .country.dimmed { fill: #c8c4bb; cursor: default; }
+  .country.dimmed:hover { fill: #c8c4bb; }
+  .country { fill: #9fe1cb; stroke: #fff; stroke-width: 0.5px; transition: fill 0.12s; cursor: crosshair; }
+  .country:hover { fill: #5dcaa5; }
+  .country.target  { fill: #fac775; stroke: #ba7517; stroke-width: 1.5px; }
+  .country.correct { fill: #97c459; stroke: #3b6d11; stroke-width: 1.5px; }
+  .country.wrong   { fill: #f09595; stroke: #a32d2d; stroke-width: 1.5px; }
+
+  .graticule { fill: none; stroke: #b8d9f0; stroke-width: 0.4px; pointer-events: none; }
+  .sphere { fill: #d4eaf7; }
+  .border { fill: none; stroke: #fff; stroke-width: 0.5px; pointer-events: none; }
+
+  #zoom-controls {
+    position: absolute; right: 12px; top: 12px;
+    display: flex; flex-direction: column; gap: 4px; z-index: 5;
+  }
+  .zoom-btn {
+    width: 32px; height: 32px; border-radius: 8px;
+    border: 1px solid #ccc; background: rgba(255,255,255,0.92);
+    cursor: pointer; font-size: 18px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; color: #333;
+  }
+  .zoom-btn:hover { background: #fff; }
+
+  #zoom-hint { position: absolute; left: 12px; bottom: 12px; font-size: 11px; color: rgba(0,0,0,0.4); pointer-events: none; }
+
+  #tooltip {
+    position: absolute; background: rgba(0,0,0,0.72); color: #fff;
+    font-size: 12px; padding: 4px 10px; border-radius: 6px;
+    pointer-events: none; display: none; z-index: 10; white-space: nowrap;
+  }
+
+  #scoreboard {
+    position: absolute; inset: 0; background: rgba(255,255,255,0.97);
+    border-radius: 12px; display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; z-index: 20;
+  }
+  #scoreboard.show { display: flex; }
+  #scoreboard h2 { font-size: 22px; font-weight: 600; }
+  #score-big { font-size: 56px; font-weight: 700; color: #1d9e75; line-height: 1; }
+  #score-sub { font-size: 14px; color: #666; }
+  #breakdown { font-size: 13px; color: #888; text-align: center; line-height: 1.9; }
+
+  #feedback { text-align: center; font-size: 14px; font-weight: 500; min-height: 24px; margin-bottom: 0.6rem; }
+  #feedback.ok  { color: #3b6d11; }
+  #feedback.bad { color: #a32d2d; }
+
+  #name-row { display: flex; gap: 8px; margin-bottom: 0.75rem; }
+  #guess-input { flex: 1; padding: 9px 13px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; background: #fff; }
+  #guess-input:focus { outline: none; box-shadow: 0 0 0 2px #9fe1cb; border-color: #1d9e75; }
+
+  .btn { padding: 9px 18px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 13px; }
+  .btn:hover { background: #f5f5f0; }
+  .btn.primary { background: #1d9e75; color: #fff; border-color: transparent; }
+  .btn.primary:hover { background: #0f6e56; }
+  #action-row { display: flex; gap: 8px; }
+  #region-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 1rem; }
+  .region-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 12px; font-weight: 500; }
+  .region-btn:hover { background: #f5f5f0; }
+  .region-btn.active { color: #fff; border-color: transparent; }
+  .region-btn[data-region="All"].active       { background: #555; }
+  .region-btn[data-region="Americas"].active  { background: #2e7d32; }
+  .region-btn[data-region="Europe"].active    { background: #1565c0; }
+  .region-btn[data-region="Africa"].active    { background: #e65100; }
+  .region-btn[data-region="Asia"].active      { background: #6a1b9a; }
+  .region-btn[data-region="Middle East"].active { background: #c62828; }
+
+  @media (max-width: 600px) {
+    #map-wrap { height: 340px; }
+    .stat { padding: 5px 10px; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>🌍 World Geography Quiz</h1>
+
+  <div id="mode-bar">
+    <button class="mode-btn active" id="btn-click" onclick="setMode('click')">Click the country</button>
+    <button class="mode-btn" id="btn-name" onclick="setMode('name')">Name the country</button>
+  </div>
+
+  <div id="region-bar">
+    <button class="region-btn active" data-region="All"        onclick="setRegion('All')">🌍 All</button>
+    <button class="region-btn"        data-region="Americas"   onclick="setRegion('Americas')">🌎 Americas</button>
+    <button class="region-btn"        data-region="Europe"     onclick="setRegion('Europe')">🇪🇺 Europe</button>
+    <button class="region-btn"        data-region="Africa"     onclick="setRegion('Africa')">Africa</button>
+    <button class="region-btn"        data-region="Middle East" onclick="setRegion('Middle East')">Middle East</button>
+    <button class="region-btn"        data-region="Asia"       onclick="setRegion('Asia')">🌏 Asia</button>
+  </div>
+
+  <div id="hud">
+    <div class="stat">Score <span id="score-disp">0</span></div>
+    <div class="stat">Round <span id="round-disp">1</span> / <span id="total-disp">10</span></div>
+    <div class="stat">Lives <span id="lives-disp"></span></div>
+    <div class="stat">Streak <span id="streak-disp">0</span> 🔥</div>
+  </div>
+
+  <div id="prompt-box">
+    <span class="badge" id="mode-label">Click</span>
+    <span id="prompt-text">Loading map…</span>
+  </div>
+
+  <div id="map-wrap">
+    <svg id="world-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="zoom-controls">
+      <button class="zoom-btn" id="zoom-in"    title="Zoom in">+</button>
+      <button class="zoom-btn" id="zoom-out"   title="Zoom out">−</button>
+      <button class="zoom-btn" id="zoom-reset" title="Reset view" style="font-size:13px">⌂</button>
+    </div>
+    <div id="zoom-hint">Scroll to zoom · Drag to pan</div>
+    <div id="tooltip"></div>
+    <div id="scoreboard">
+      <h2 id="final-title">Quiz complete!</h2>
+      <div id="score-big">0</div>
+      <div id="score-sub">points</div>
+      <div id="breakdown"></div>
+      <button class="btn primary" onclick="startGame()">Play again</button>
+    </div>
+  </div>
+
+  <div id="feedback"></div>
+
+  <div id="name-row" style="display:none">
+    <input id="guess-input" type="text" placeholder="Type country name…" autocomplete="off"
+           onkeydown="if(event.key==='Enter')checkName()"/>
+    <button class="btn primary" onclick="checkName()">Guess</button>
+    <button class="btn" onclick="skipQuestion()">Skip</button>
+  </div>
+
+  <div id="action-row">
+    <button class="btn" onclick="skipQuestion()" id="skip-btn">Skip / Give up</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<script>
+const ROUNDS = 10, MAX_ATTEMPTS = 3, PTS_FIRST = 3, PTS_LATER = 1;
+
+// All keys are zero-padded 3-digit strings matching world-atlas numeric IDs exactly.
+// Each entry: [region, display-name]
+const COUNTRY_REGIONS = {
+  // ── Americas ──────────────────────────────────────────────────────────────
+  '032':'Americas', '084':'Americas', '068':'Americas', '076':'Americas',
+  '124':'Americas', '152':'Americas', '170':'Americas', '188':'Americas',
+  '192':'Americas', '214':'Americas', '218':'Americas', '222':'Americas',
+  '320':'Americas', '328':'Americas', '332':'Americas', '340':'Americas',
+  '388':'Americas', '484':'Americas', '558':'Americas', '591':'Americas',
+  '600':'Americas', '604':'Americas', '630':'Americas', '740':'Americas',
+  '780':'Americas', '840':'Americas', '858':'Americas', '862':'Americas',
+  // ── Europe ────────────────────────────────────────────────────────────────
+  '008':'Europe', '040':'Europe', '112':'Europe', '056':'Europe',
+  '070':'Europe', '100':'Europe', '191':'Europe', '196':'Europe',
+  '203':'Europe', '208':'Europe', '233':'Europe', '246':'Europe',
+  '250':'Europe', '276':'Europe', '300':'Europe', '348':'Europe',
+  '352':'Europe', '372':'Europe', '380':'Europe', '428':'Europe',
+  '440':'Europe', '442':'Europe', '470':'Europe', '498':'Europe',
+  '499':'Europe', '528':'Europe', '807':'Europe', '578':'Europe',
+  '616':'Europe', '620':'Europe', '642':'Europe', '643':'Europe',
+  '688':'Europe', '703':'Europe', '705':'Europe', '724':'Europe',
+  '752':'Europe', '756':'Europe', '804':'Europe', '826':'Europe',
+  // ── Africa ────────────────────────────────────────────────────────────────
+  '012':'Africa', '024':'Africa', '204':'Africa', '072':'Africa',
+  '854':'Africa', '108':'Africa', '120':'Africa', '140':'Africa',
+  '148':'Africa', '178':'Africa', '384':'Africa', '180':'Africa',
+  '262':'Africa', '226':'Africa', '232':'Africa', '231':'Africa',
+  '266':'Africa', '270':'Africa', '288':'Africa', '324':'Africa',
+  '624':'Africa', '404':'Africa', '426':'Africa', '430':'Africa',
+  '434':'Africa', '450':'Africa', '454':'Africa', '466':'Africa',
+  '478':'Africa', '504':'Africa', '508':'Africa', '516':'Africa',
+  '562':'Africa', '566':'Africa', '646':'Africa', '686':'Africa',
+  '694':'Africa', '706':'Africa', '710':'Africa', '728':'Africa',
+  '729':'Africa', '834':'Africa', '768':'Africa', '788':'Africa',
+  '800':'Africa', '894':'Africa', '716':'Africa',
+  // ── Middle East ───────────────────────────────────────────────────────────
+  '818':'Middle East', '364':'Middle East', '368':'Middle East',
+  '376':'Middle East', '400':'Middle East', '414':'Middle East',
+  '422':'Middle East', '512':'Middle East', '275':'Middle East',
+  '634':'Middle East', '682':'Middle East', '760':'Middle East',
+  '784':'Middle East', '887':'Middle East',
+  // ── Asia ──────────────────────────────────────────────────────────────────
+  '004':'Middle East', '051':'Middle East', '031':'Middle East', '050':'Asia', '064':'Asia',
+  '096':'Asia', '116':'Asia', '156':'Asia', '268':'Middle East', '356':'Asia',
+  '360':'Asia', '392':'Asia', '398':'Middle East', '417':'Middle East', '418':'Asia',
+  '458':'Asia', '496':'Asia', '104':'Asia', '524':'Asia', '554':'Asia',
+  '408':'Asia', '410':'Asia', '586':'Middle East', '598':'Asia', '608':'Asia',
+  '702':'Asia', '144':'Asia', '158':'Asia', '762':'Middle East', '764':'Asia',
+  '626':'Asia', '792':'Middle East', '795':'Middle East', '860':'Middle East', '704':'Asia',
+  '242':'Asia','036':'Asia','304':'Europe',
+};
+
+// Display names (may differ slightly from dataset names for clarity)
+const COUNTRIES = {
+  // Americas
+  '032':'Argentina','084':'Belize','068':'Bolivia','076':'Brazil',
+  '124':'Canada','152':'Chile','170':'Colombia','188':'Costa Rica',
+  '192':'Cuba','214':'Dominican Rep.','218':'Ecuador','222':'El Salvador',
+  '320':'Guatemala','328':'Guyana','332':'Haiti','340':'Honduras',
+  '388':'Jamaica','484':'Mexico','558':'Nicaragua','591':'Panama',
+  '600':'Paraguay','604':'Peru','740':'Suriname','780':'Trinidad and Tobago',
+  '840':'United States','858':'Uruguay','862':'Venezuela',
+  // Europe
+  '008':'Albania','040':'Austria','112':'Belarus','056':'Belgium',
+  '070':'Bosnia and Herzegovina','100':'Bulgaria','191':'Croatia',
+  '196':'Cyprus','203':'Czechia','208':'Denmark','233':'Estonia',
+  '246':'Finland','250':'France','276':'Germany','300':'Greece',
+  '348':'Hungary','352':'Iceland','372':'Ireland','380':'Italy',
+  '428':'Latvia','440':'Lithuania','442':'Luxembourg','470':'Malta',
+  '498':'Moldova','499':'Montenegro','528':'Netherlands',
+  '807':'North Macedonia','578':'Norway','616':'Poland','620':'Portugal',
+  '642':'Romania','643':'Russia','688':'Serbia','703':'Slovakia',
+  '705':'Slovenia','724':'Spain','752':'Sweden','756':'Switzerland',
+  '804':'Ukraine','826':'United Kingdom',
+  // Africa
+  '012':'Algeria','024':'Angola','204':'Benin','072':'Botswana',
+  '854':'Burkina Faso','108':'Burundi','120':'Cameroon',
+  '140':'Central African Rep.','148':'Chad','178':'Congo',
+  "384":"Cote d'Ivoire",'180':'DR Congo','262':'Djibouti',
+  '226':'Equatorial Guinea','232':'Eritrea','231':'Ethiopia',
+  '266':'Gabon','270':'Gambia','288':'Ghana','324':'Guinea',
+  '624':'Guinea-Bissau','404':'Kenya','426':'Lesotho','430':'Liberia',
+  '434':'Libya','450':'Madagascar','454':'Malawi','466':'Mali',
+  '478':'Mauritania','504':'Morocco','508':'Mozambique','516':'Namibia',
+  '562':'Niger','566':'Nigeria','646':'Rwanda','686':'Senegal',
+  '694':'Sierra Leone','706':'Somalia','710':'South Africa',
+  '728':'South Sudan','729':'Sudan','834':'Tanzania','768':'Togo',
+  '788':'Tunisia','800':'Uganda','894':'Zambia','716':'Zimbabwe',
+  // Middle East
+  '818':'Egypt','364':'Iran','368':'Iraq','376':'Israel','400':'Jordan',
+  '414':'Kuwait','422':'Lebanon','512':'Oman','275':'Palestine',
+  '634':'Qatar','682':'Saudi Arabia','760':'Syria',
+  '784':'United Arab Emirates','887':'Yemen',
+  // Asia
+  '004':'Afghanistan','051':'Armenia','031':'Azerbaijan','050':'Bangladesh',
+  '064':'Bhutan','096':'Brunei','116':'Cambodia','156':'China',
+  '268':'Georgia','356':'India','360':'Indonesia','392':'Japan',
+  '398':'Kazakhstan','417':'Kyrgyzstan','418':'Laos','458':'Malaysia',
+  '496':'Mongolia','104':'Myanmar','524':'Nepal','554':'New Zealand',
+  '408':'North Korea','410':'South Korea','586':'Pakistan',
+  '598':'Papua New Guinea','608':'Philippines','702':'Singapore',
+  '144':'Sri Lanka','158':'Taiwan','762':'Tajikistan','764':'Thailand',
+  '626':'Timor-Leste','792':'Turkey','795':'Turkmenistan',
+  '860':'Uzbekistan','704':'Vietnam','242':'Fiji',
+  '036':'Australia','304':'Greenland',
+};
+
+let mode = 'click', region = 'All';
+let score = 0, round = 0, streak = 0, attempts = 0;
+let currentId = '', questionPool = [], geoIndex = {}, gameOver = false;
+
+const mapWrap = document.getElementById('map-wrap');
+const svgEl   = document.getElementById('world-svg');
+const tooltip = document.getElementById('tooltip');
+let W, H, projection, pathGen, zoomBehavior, mapGroup;
+
+function initMap() {
+  W = mapWrap.clientWidth;
+  H = mapWrap.clientHeight;
+
+  const svg = d3.select(svgEl)
+    .attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('width', W).attr('height', H);
+
+  svg.selectAll('*').remove();
+
+  // Natural Earth projection — accurate, visually pleasing, no pole distortion
+  projection = d3.geoNaturalEarth1()
+    .scale(W / 6.1)
+    .translate([W / 2, H / 2]);
+
+  pathGen = d3.geoPath().projection(projection);
+
+  svg.append('rect').attr('width', W).attr('height', H).attr('fill', '#d4eaf7');
+
+  mapGroup = svg.append('g');
+
+  // Sphere outline
+  mapGroup.append('path')
+    .datum({type:'Sphere'})
+    .attr('class','sphere')
+    .attr('d', pathGen);
+
+  // Graticule grid
+  mapGroup.append('path')
+    .datum(d3.geoGraticule()())
+    .attr('class','graticule')
+    .attr('d', pathGen);
+
+  // Zoom
+  zoomBehavior = d3.zoom()
+    .scaleExtent([1, 20])
+    .translateExtent([[-W * 0.5, -H * 0.5], [W * 1.5, H * 1.5]])
+    .on('zoom', (event) => {
+      const k = event.transform.k;
+      mapGroup.attr('transform', event.transform);
+      mapGroup.selectAll('.country').style('stroke-width', (0.5 / k) + 'px');
+      mapGroup.selectAll('.country.target, .country.correct, .country.wrong')
+        .style('stroke-width', (1.5 / k) + 'px');
+      mapGroup.selectAll('.border').style('stroke-width', (0.5 / k) + 'px');
+      mapGroup.selectAll('.country-bg').style('stroke-width', (0.5 / k) + 'px');
+      mapGroup.selectAll('[stroke="#7aaecc"]').style('stroke-width', (0.6 / k) + 'px');
+    })
+    .on('start', () => mapWrap.classList.add('dragging'))
+    .on('end',   () => mapWrap.classList.remove('dragging'));
+
+  d3.select(svgEl).call(zoomBehavior);
+
+  document.getElementById('zoom-in').onclick    = () => d3.select(svgEl).transition().duration(300).call(zoomBehavior.scaleBy, 1.6);
+  document.getElementById('zoom-out').onclick   = () => d3.select(svgEl).transition().duration(300).call(zoomBehavior.scaleBy, 0.625);
+  document.getElementById('zoom-reset').onclick = resetView;
+}
+
+// Countries whose geometry crosses the antimeridian and would skew regional bounds
+const ANTIMERIDIAN_IDS = new Set(['643','840','036','554','242']); // Russia, USA, Australia, NZ, Fiji
+
+function zoomToBox(x0, y0, x1, y1, duration) {
+  const bw = x1 - x0, bh = y1 - y0;
+  if (bw < 1 && bh < 1) return;
+  const scale = Math.min(12, 0.88 / Math.max(bw / W, bh / H));
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  d3.select(svgEl).transition().duration(duration)
+    .call(zoomBehavior.transform,
+      d3.zoomIdentity.translate(W / 2, H / 2).scale(scale).translate(-cx, -cy));
+}
+
+function resetView(duration = 500) {
+  d3.select(svgEl).transition().duration(duration)
+    .call(zoomBehavior.transform, d3.zoomIdentity);
+}
+
+function zoomToRegion(r, duration = 600) {
+  if (r === 'All') { resetView(duration); return; }
+  const ids = Object.keys(COUNTRIES).filter(id => COUNTRY_REGIONS[id] === r);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  ids.forEach(id => {
+    if (ANTIMERIDIAN_IDS.has(id)) return; // skip — their bounds wrap and skew the box
+    const entry = geoIndex[id];
+    if (!entry) return;
+    const [[fx0,fy0],[fx1,fy1]] = pathGen.bounds(entry.feature);
+    x0 = Math.min(x0, fx0); y0 = Math.min(y0, fy0);
+    x1 = Math.max(x1, fx1); y1 = Math.max(y1, fy1);
+  });
+  zoomToBox(x0, y0, x1, y1, duration);
+}
+
+function zoomToCountry(id) {
+  const entry = geoIndex[id];
+  if (!entry) return;
+  const [[x0,y0],[x1,y1]] = pathGen.bounds(entry.feature);
+  const bw = x1 - x0, bh = y1 - y0;
+  if (bw < 2 && bh < 2) return;
+  zoomToBox(x0, y0, x1, y1, 700);
+}
+
+async function loadMap() {
+  initMap();
+  const world = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json');
+  const countries = topojson.feature(world, world.objects.countries);
+  // Interior borders (country-to-country only, excludes coastlines)
+  const borders   = topojson.mesh(world, world.objects.countries, (a, b) => a !== b);
+  // Exterior borders = coastlines (where a feature meets the outer boundary)
+  const coastline = topojson.mesh(world, world.objects.countries, (a, b) => a === b);
+
+  countries.features.forEach(f => {
+    // world-atlas IDs are zero-padded 3-digit strings (e.g. "036" not "36")
+    const id = String(f.id).padStart(3, '0');
+    const name = COUNTRIES[id];
+    // Skip duplicate IDs (e.g. Ashmore Is. shares 036 with Australia)
+    if (geoIndex[id]) return;
+
+    if (!name) {
+      // Non-playable territory — render in muted colour, no interaction
+      mapGroup.append('path')
+        .datum(f)
+        .attr('class', 'country-bg')
+        .attr('d', pathGen);
+      return;
+    }
+
+    const path = mapGroup.append('path')
+      .datum(f)
+      .attr('class', 'country')
+      .attr('d', pathGen)
+      .on('mousemove', () => { tooltip.style.display = 'none'; })
+      .on('mouseleave', () => { tooltip.style.display = 'none'; })
+      .on('click', (event) => { event.stopPropagation(); handleMapClick(id); });
+
+    geoIndex[id] = { name, path, feature: f };
+  });
+
+  // Coastline (exterior edges) — gives countries a visible border against ocean
+  mapGroup.append('path')
+    .datum(coastline)
+    .attr('fill', 'none')
+    .attr('stroke', '#7aaecc')
+    .attr('stroke-width', '0.6px')
+    .attr('pointer-events', 'none');
+
+  // Interior country borders on top
+  mapGroup.append('path')
+    .datum(borders)
+    .attr('class','border')
+    .attr('d', pathGen);
+
+  startGame();
+}
+
+// ── Game ───────────────────────────────────────────────────────────────────────
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length-1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+
+function setRegion(r) {
+  region = r;
+  document.querySelectorAll('.region-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.region === r);
+  });
+  startGame();
+}
+
+function startGame() {
+  score = 0; round = 0; streak = 0; attempts = 0; gameOver = false;
+  const pool = region === 'All'
+    ? Object.keys(COUNTRIES)
+    : Object.keys(COUNTRIES).filter(id => COUNTRY_REGIONS[id] === region);
+  questionPool = shuffle(pool).slice(0, ROUNDS);
+  document.getElementById('scoreboard').classList.remove('show');
+  document.getElementById('total-disp').textContent = ROUNDS;
+  zoomToRegion(region, 400);
+  updateHUD();
+  nextRound();
+}
+
+function resetClasses() {
+  const inRegion = region === 'All'
+    ? null
+    : new Set(Object.keys(COUNTRIES).filter(id => COUNTRY_REGIONS[id] === region));
+  Object.entries(geoIndex).forEach(([id, {path}]) => {
+    path.attr('class', inRegion && !inRegion.has(id) ? 'country dimmed' : 'country');
+  });
+}
+
+function nextRound() {
+  if (round >= ROUNDS) { endGame(); return; }
+  resetClasses();
+  attempts = 0;
+  setFeedback('','');
+  currentId = questionPool[round];
+  round++;
+  updateHUD();
+  const name = COUNTRIES[currentId];
+
+  if (mode === 'click') {
+    document.getElementById('prompt-text').textContent = `Find and click: ${name}`;
+    document.getElementById('name-row').style.display = 'none';
+    document.getElementById('skip-btn').style.display = '';
+    zoomToRegion(region, 400);
+  } else {
+    if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
+    document.getElementById('prompt-text').textContent = 'Which country is highlighted in orange?';
+    document.getElementById('name-row').style.display = 'flex';
+    document.getElementById('skip-btn').style.display = 'none';
+    document.getElementById('guess-input').value = '';
+    setTimeout(() => document.getElementById('guess-input').focus(), 50);
+    zoomToCountry(currentId);
+  }
+}
+
+function handleMapClick(id) {
+  if (mode !== 'click' || gameOver) return;
+  if (id === currentId) {
+    if (geoIndex[id]) geoIndex[id].path.attr('class','country correct');
+    awardCorrect(id);
+  } else {
+    attempts++;
+    if (geoIndex[id]) geoIndex[id].path.attr('class','country wrong');
+    if (attempts >= MAX_ATTEMPTS) { markFail(); return; }
+    const left = MAX_ATTEMPTS - attempts;
+    setFeedback(`Wrong! ${left} attempt${left===1?'':'s'} left.`,'bad');
+    updateHUD();
+  }
+}
+
+function checkName() {
+  if (mode !== 'name' || gameOver) return;
+  const val = document.getElementById('guess-input').value.trim();
+  if (!val) return;
+  if (val.toLowerCase() === COUNTRIES[currentId].toLowerCase()) {
+    if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country correct');
+    awardCorrect(currentId);
+  } else {
+    attempts++;
+    if (attempts >= MAX_ATTEMPTS) { markFail(); return; }
+    const left = MAX_ATTEMPTS - attempts;
+    setFeedback(`Not quite! ${left} attempt${left===1?'':'s'} left.`,'bad');
+    document.getElementById('guess-input').value = '';
+    document.getElementById('guess-input').focus();
+    updateHUD();
+  }
+}
+
+function awardCorrect(id) {
+  const pts = attempts === 0 ? PTS_FIRST : PTS_LATER;
+  score += pts; streak++;
+  let bonus = 0;
+  if (streak >= 3) { bonus = Math.floor(streak/3); score += bonus; }
+  setFeedback(`✓ Correct! +${pts} pts${bonus > 0 ? ' +'+bonus+' streak bonus!' : ''}`, 'ok');
+  updateHUD();
+  setTimeout(nextRound, 1000);
+}
+
+function markFail() {
+  streak = 0;
+  if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
+  setFeedback(`It was ${COUNTRIES[currentId]}`, 'bad');
+  updateHUD();
+  setTimeout(nextRound, 1600);
+}
+
+function skipQuestion() {
+  streak = 0;
+  if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
+  setFeedback(`Skipped — it was ${COUNTRIES[currentId]}`, 'bad');
+  updateHUD();
+  setTimeout(nextRound, 1600);
+}
+
+function endGame() {
+  gameOver = true;
+  const maxP = ROUNDS * PTS_FIRST;
+  const pct  = Math.round((score / maxP) * 100);
+  document.getElementById('final-title').textContent =
+    pct >= 80 ? 'Excellent! 🏆' : pct >= 50 ? 'Good job! 👍' : 'Keep practising! 📚';
+  document.getElementById('score-big').textContent = score;
+  document.getElementById('score-sub').textContent = `points (${pct}% of ${maxP} possible)`;
+  document.getElementById('breakdown').innerHTML =
+    `${ROUNDS} rounds &nbsp;·&nbsp; ${MAX_ATTEMPTS} attempts per round<br>` +
+    `Mode: ${mode === 'click' ? 'Click the country' : 'Name the country'} &nbsp;·&nbsp; Region: ${region}`;
+  document.getElementById('scoreboard').classList.add('show');
+}
+
+function setFeedback(msg, cls) {
+  const el = document.getElementById('feedback');
+  el.textContent = msg; el.className = cls;
+}
+
+function updateHUD() {
+  document.getElementById('score-disp').textContent = score;
+  document.getElementById('round-disp').textContent = round;
+  document.getElementById('streak-disp').textContent = streak;
+  const livesLeft = MAX_ATTEMPTS - attempts;
+  let dots = '';
+  for (let i = 0; i < MAX_ATTEMPTS; i++)
+    dots += `<span class="life-dot${i >= livesLeft ? ' lost':''}"></span>`;
+  document.getElementById('lives-disp').innerHTML = dots;
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-click').className = 'mode-btn'+(m==='click'?' active':'');
+  document.getElementById('btn-name').className  = 'mode-btn'+(m==='name' ?' active':'');
+  document.getElementById('mode-label').textContent = m==='click'?'Click':'Name';
+  startGame();
+}
+
+loadMap().catch(err => {
+  document.getElementById('prompt-text').textContent =
+    'Failed to load map. Check internet connection and reload.';
+  console.error(err);
+});
+</script>
+</body>
+</html>
