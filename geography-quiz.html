@@ -13,6 +13,8 @@
   #mode-bar { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; }
   .mode-btn { padding: 8px 18px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 13px; }
   .mode-btn.active { background: #1d9e75; color: #fff; border-color: transparent; }
+  .mode-btn#btn-lookup.active { background: #5b6af0; border-color: transparent; }
+  .mode-btn:disabled { opacity: 0.38; cursor: not-allowed; }
 
   #hud { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
   .stat { background: #fff; border: 1px solid #e0dfd8; border-radius: 8px; padding: 6px 14px; font-size: 13px; color: #666; }
@@ -46,6 +48,12 @@
   .country.target  { fill: #fac775; stroke: #ba7517; stroke-width: 1.5px; }
   .country.correct { fill: #97c459; stroke: #3b6d11; stroke-width: 1.5px; }
   .country.wrong   { fill: #f09595; stroke: #a32d2d; stroke-width: 1.5px; }
+  .country.reveal  { fill: #fac775; stroke: #ba7517; stroke-width: 1.5px;
+                     animation: reveal-pulse 0.9s ease-in-out infinite alternate; }
+  @keyframes reveal-pulse {
+    from { fill: #fac775; }
+    to   { fill: #ff9500; }
+  }
 
   .graticule { fill: none; stroke: #b8d9f0; stroke-width: 0.4px; pointer-events: none; }
   .sphere { fill: #d4eaf7; }
@@ -89,6 +97,23 @@
   .btn.primary { background: #1d9e75; color: #fff; border-color: transparent; }
   .btn.primary:hover { background: #0f6e56; }
   #action-row { display: flex; gap: 8px; }
+
+  /* ── Lookup panel (country finder, shown in lookup mode) ── */
+  #lookup-panel { display: none; }
+  #lookup-panel.show { display: block; }
+  #lookup-row { display: flex; gap: 8px; position: relative; margin-bottom: 6px; }
+  #lookup-input { flex: 1; padding: 9px 13px; border-radius: 8px; border: 1px solid #ccc;
+                  font-size: 14px; background: #fff; }
+  #lookup-input:focus { outline: none; box-shadow: 0 0 0 2px #c7cafa; border-color: #5b6af0; }
+  #lookup-suggestions { position: absolute; top: calc(100% + 4px); left: 0;
+                        background: #fff; border: 1px solid #ddd; border-radius: 8px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 30;
+                        width: 100%; max-height: 220px; overflow-y: auto; display: none;
+                        list-style: none; }
+  #lookup-suggestions.show { display: block; }
+  .lookup-item { padding: 8px 14px; font-size: 13px; cursor: pointer; }
+  .lookup-item:hover, .lookup-item.active { background: #eef0fd; color: #3340c4; }
+  #lookup-feedback { font-size: 13px; color: #888; min-height: 20px; }
   #region-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 1rem; }
   .region-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 12px; font-weight: 500; }
   .region-btn:hover { background: #f5f5f0; }
@@ -111,8 +136,9 @@
   <h1>🌍 World Geography Quiz</h1>
 
   <div id="mode-bar">
-    <button class="mode-btn active" id="btn-click" onclick="setMode('click')">Click the country</button>
-    <button class="mode-btn" id="btn-name" onclick="setMode('name')">Name the country</button>
+    <button class="mode-btn" id="btn-click"  onclick="setMode('click')">Click the country</button>
+    <button class="mode-btn" id="btn-name"   onclick="setMode('name')">Name the country</button>
+    <button class="mode-btn" id="btn-lookup" onclick="setMode('lookup')">🔍 Look up a country</button>
   </div>
 
   <div id="region-bar">
@@ -150,6 +176,7 @@
       <div id="score-sub">points</div>
       <div id="breakdown"></div>
       <button class="btn primary" onclick="startGame()">Play again</button>
+      <button class="btn" onclick="setMode('lookup')">🔍 Look up a country</button>
     </div>
   </div>
 
@@ -164,6 +191,16 @@
 
   <div id="action-row">
     <button class="btn" onclick="skipQuestion()" id="skip-btn">Skip / Give up</button>
+  </div>
+
+  <div id="lookup-panel">
+    <div id="lookup-row">
+      <input id="lookup-input" type="text" placeholder="Type a country name…" autocomplete="off"
+             onkeydown="handleLookupKey(event)" oninput="onLookupInput()"/>
+      <button class="btn primary" style="background:#5b6af0;border-color:#5b6af0" onclick="doLookup()">Find</button>
+      <ul id="lookup-suggestions"></ul>
+    </div>
+    <div id="lookup-feedback"></div>
   </div>
 </div>
 
@@ -330,7 +367,7 @@ function initMap() {
       const k = event.transform.k;
       mapGroup.attr('transform', event.transform);
       mapGroup.selectAll('.country').style('stroke-width', (0.5 / k) + 'px');
-      mapGroup.selectAll('.country.target, .country.correct, .country.wrong')
+      mapGroup.selectAll('.country.target, .country.correct, .country.wrong, .country.reveal')
         .style('stroke-width', (1.5 / k) + 'px');
       mapGroup.selectAll('.border').style('stroke-width', (0.5 / k) + 'px');
       mapGroup.selectAll('.country-bg').style('stroke-width', (0.5 / k) + 'px');
@@ -436,7 +473,7 @@ async function loadMap() {
     .attr('class','border')
     .attr('d', pathGen);
 
-  startGame();
+  initIdle();
 }
 
 // ── Game ───────────────────────────────────────────────────────────────────────
@@ -454,12 +491,21 @@ function setRegion(r) {
   document.querySelectorAll('.region-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.region === r);
   });
-  startGame();
+  if (mode === 'click' || mode === 'name') startGame();
 }
 
 function startGame() {
   clearTimeout(pendingTimeout); pendingTimeout = null;
+  hideLookup();
   score = 0; round = 0; streak = 0; attempts = 0; gameOver = false;
+  // Grey out lookup during game; restore game chrome visibility
+  document.getElementById('btn-lookup').disabled = true;
+  document.getElementById('region-bar').style.display = '';
+  document.getElementById('hud').style.display = '';
+  document.getElementById('prompt-box').style.display = '';
+  document.getElementById('action-row').style.display = '';
+  document.getElementById('feedback').style.display = '';
+  document.getElementById('mode-label').textContent = mode === 'click' ? 'Click' : 'Name';
   const pool = region === 'All'
     ? Object.keys(COUNTRIES)
     : Object.keys(COUNTRIES).filter(id => COUNTRY_REGIONS[id] === region);
@@ -635,24 +681,55 @@ function awardCorrect(id) {
   pendingTimeout = setTimeout(nextRound, 1000);
 }
 
+// Show the correct country after a wrong answer or skip:
+// zooms it into view (always, regardless of size) then pulses it for 3 s.
+function revealCountry(id) {
+  if (geoIndex[id]) geoIndex[id].path.attr('class', 'country reveal');
+
+  // Zoom to fit — use a gentler max scale (6) so small countries aren't over-zoomed,
+  // and always zoom even if the country is tiny (no bw/bh guard here).
+  const entry = geoIndex[id];
+  if (entry && !ANTIMERIDIAN_IDS.has(id)) {
+    const [[x0,y0],[x1,y1]] = pathGen.bounds(entry.feature);
+    const bw = x1 - x0, bh = y1 - y0;
+    const pad = Math.max(bw, bh) * 0.5 + 20; // breathing room around the country
+    const scale = Math.min(6, 0.75 / Math.max((bw + pad) / W, (bh + pad) / H));
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+
+    // Only zoom in if the country isn't already comfortably in frame
+    const current = d3.zoomTransform(svgEl);
+    const [sx, sy] = current.apply([cx, cy]);
+    const margin = 40;
+    const inView = sx > margin && sx < W - margin && sy > margin && sy < H - margin
+                   && current.k >= scale * 0.6;
+
+    if (!inView) {
+      d3.select(svgEl).transition().duration(600)
+        .call(zoomBehavior.transform,
+          d3.zoomIdentity.translate(W / 2, H / 2).scale(scale).translate(-cx, -cy));
+    }
+  }
+}
+
 function markFail() {
   streak = 0;
-  if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
+  revealCountry(currentId);
   setFeedback(`It was ${COUNTRIES[currentId]}`, 'bad');
   updateHUD();
-  pendingTimeout = setTimeout(nextRound, 1600);
+  pendingTimeout = setTimeout(nextRound, 3000);
 }
 
 function skipQuestion() {
   streak = 0;
-  if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
+  revealCountry(currentId);
   setFeedback(`Skipped — it was ${COUNTRIES[currentId]}`, 'bad');
   updateHUD();
-  pendingTimeout = setTimeout(nextRound, 1600);
+  pendingTimeout = setTimeout(nextRound, 3000);
 }
 
 function endGame() {
   gameOver = true;
+  document.getElementById('btn-lookup').disabled = false;
   const maxP = ROUNDS * PTS_FIRST;
   const pct  = Math.round((score / maxP) * 100);
   document.getElementById('final-title').textContent =
@@ -683,10 +760,177 @@ function updateHUD() {
 
 function setMode(m) {
   mode = m;
-  document.getElementById('btn-click').className = 'mode-btn'+(m==='click'?' active':'');
-  document.getElementById('btn-name').className  = 'mode-btn'+(m==='name' ?' active':'');
-  document.getElementById('mode-label').textContent = m==='click'?'Click':'Name';
-  startGame();
+  const isGame = m === 'click' || m === 'name';
+  const isLookup = m === 'lookup';
+  const isIdle = m === 'idle';
+
+  // Mode bar button states
+  document.getElementById('btn-click').classList.toggle('active', m === 'click');
+  document.getElementById('btn-name').classList.toggle('active', m === 'name');
+  document.getElementById('btn-lookup').classList.toggle('active', isLookup);
+  // Lookup button greyed out mid-game (gameOver=false and a game is running)
+  const gameRunning = isGame && !gameOver;
+  document.getElementById('btn-lookup').disabled = gameRunning;
+
+  // Show/hide game chrome
+  document.getElementById('region-bar').style.display  = isLookup || isIdle ? 'none' : '';
+  document.getElementById('hud').style.display         = isLookup || isIdle ? 'none' : '';
+  document.getElementById('prompt-box').style.display  = isLookup || isIdle ? 'none' : '';
+  document.getElementById('name-row').style.display    = 'none'; // nextRound manages this
+  document.getElementById('action-row').style.display  = isLookup || isIdle ? 'none' : '';
+  document.getElementById('feedback').style.display    = isLookup || isIdle ? 'none' : '';
+
+  // Show/hide lookup panel
+  if (isLookup) {
+    document.getElementById('scoreboard').classList.remove('show');
+    showLookup();
+  } else {
+    hideLookup();
+  }
+
+  // Idle welcome state — map loaded, nothing started yet
+  if (isIdle) {
+    document.getElementById('scoreboard').classList.remove('show');
+    document.getElementById('prompt-box').style.display = '';
+    document.getElementById('prompt-text').textContent = 'Choose a mode above to begin.';
+    document.getElementById('mode-label').textContent = '';
+    resetView(400);
+    return;
+  }
+
+  if (isGame) startGame();
+}
+
+function initIdle() {
+  setMode('idle');
+}
+
+// ── Country lookup (available between game sessions only) ─────────────────────
+const lookupPanel      = document.getElementById('lookup-panel');
+const lookupInput      = document.getElementById('lookup-input');
+const lookupSuggestions = document.getElementById('lookup-suggestions');
+const lookupFeedback   = document.getElementById('lookup-feedback');
+
+let lookupHighlightedId = null;   // currently pulsing country
+let suggestionIndex = -1;         // keyboard-navigated suggestion row
+
+function showLookup() {
+  lookupPanel.classList.add('show');
+  lookupInput.value = '';
+  lookupFeedback.textContent = '';
+  hideSuggestions();
+  lookupHighlightedId = null;
+}
+
+function hideLookup() {
+  lookupPanel.classList.remove('show');
+  clearLookupHighlight();
+}
+
+function clearLookupHighlight() {
+  if (lookupHighlightedId) {
+    const entry = geoIndex[lookupHighlightedId];
+    if (entry) entry.path.attr('class', 'country');
+    lookupHighlightedId = null;
+  }
+}
+
+function hideSuggestions() {
+  lookupSuggestions.classList.remove('show');
+  lookupSuggestions.innerHTML = '';
+  suggestionIndex = -1;
+}
+
+// Filter country names as user types — show up to 7 matches
+function onLookupInput() {
+  const raw = lookupInput.value.trim();
+  if (raw.length < 1) { hideSuggestions(); return; }
+  const q = normaliseGuess(raw);
+
+  const matches = Object.entries(COUNTRIES)
+    .filter(([id, name]) => normaliseGuess(name).includes(q)
+      || (ALIASES[id] || []).some(a => a.includes(q)))
+    .sort(([,a],[,b]) => {
+      // Exact-start matches first, then alphabetical
+      const aStarts = normaliseGuess(a).startsWith(q);
+      const bStarts = normaliseGuess(b).startsWith(q);
+      if (aStarts !== bStarts) return aStarts ? -1 : 1;
+      return a.localeCompare(b);
+    })
+    .slice(0, 7);
+
+  if (!matches.length) { hideSuggestions(); return; }
+
+  lookupSuggestions.innerHTML = '';
+  suggestionIndex = -1;
+  matches.forEach(([id, name]) => {
+    const li = document.createElement('li');
+    li.className = 'lookup-item';
+    li.textContent = name;
+    li.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // prevent input blur before click registers
+      selectSuggestion(id, name);
+    });
+    lookupSuggestions.appendChild(li);
+  });
+  lookupSuggestions.classList.add('show');
+}
+
+function selectSuggestion(id, name) {
+  lookupInput.value = name;
+  hideSuggestions();
+  performLookup(id);
+}
+
+// Arrow-key / Enter navigation within the suggestion list
+function handleLookupKey(e) {
+  const items = lookupSuggestions.querySelectorAll('.lookup-item');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    suggestionIndex = Math.min(suggestionIndex + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('active', i === suggestionIndex));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    suggestionIndex = Math.max(suggestionIndex - 1, -1);
+    items.forEach((el, i) => el.classList.toggle('active', i === suggestionIndex));
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (suggestionIndex >= 0 && items[suggestionIndex]) {
+      items[suggestionIndex].dispatchEvent(new MouseEvent('mousedown'));
+    } else {
+      doLookup();
+    }
+  } else if (e.key === 'Escape') {
+    hideSuggestions();
+  }
+}
+
+// Called by the Find button
+function doLookup() {
+  hideSuggestions();
+  const raw = lookupInput.value.trim();
+  if (!raw) return;
+
+  // Find the first country whose name or alias matches (exact/fuzzy via isCorrectGuess)
+  const found = Object.keys(COUNTRIES).find(id => isCorrectGuess(raw, id));
+  if (found) {
+    performLookup(found);
+  } else {
+    lookupFeedback.textContent = `No country found for "${raw}".`;
+    lookupFeedback.style.color = '#a32d2d';
+    clearLookupHighlight();
+  }
+}
+
+function performLookup(id) {
+  // Clear previous highlight across the whole map
+  Object.values(geoIndex).forEach(({ path }) => path.attr('class', 'country'));
+
+  lookupHighlightedId = id;
+  // Reuse revealCountry for the pulse + zoom-to-fit behaviour
+  revealCountry(id);
+  lookupFeedback.textContent = `Showing: ${COUNTRIES[id]} (${COUNTRY_REGIONS[id]})`;
+  lookupFeedback.style.color = '#0f6e56';
 }
 
 loadMap().catch(err => {
