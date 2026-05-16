@@ -10,11 +10,15 @@
   #app { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
   h1 { font-size: 22px; font-weight: 600; margin-bottom: 1rem; }
 
-  #mode-bar { display: flex; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; }
+  #mode-bar { display: flex; gap: 8px; margin-bottom: 0.5rem; flex-wrap: wrap; }
   .mode-btn { padding: 8px 18px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 13px; }
   .mode-btn.active { background: #1d9e75; color: #fff; border-color: transparent; }
   .mode-btn#btn-lookup.active { background: #5b6af0; border-color: transparent; }
   .mode-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+
+  #subject-bar { display: flex; gap: 6px; margin-bottom: 1rem; }
+  .subject-btn { padding: 5px 14px; border-radius: 20px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 12px; font-weight: 500; }
+  .subject-btn.active { background: #e8a020; color: #fff; border-color: transparent; }
 
   #hud { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
   .stat { background: #fff; border: 1px solid #e0dfd8; border-radius: 8px; padding: 6px 14px; font-size: 13px; color: #666; }
@@ -55,6 +59,20 @@
     to   { fill: #ff9500; }
   }
 
+  /* ── Capital dot layer ── */
+  .cap-dot            { cursor: default; }
+  .cap-dot.clickable  { cursor: crosshair; }
+  .cap-dot .dot-core  { fill: #e8a020; stroke: #fff; stroke-width: 1px; transition: fill 0.15s; }
+  .cap-dot.target .dot-core   { fill: #e8a020; }
+  .cap-dot.correct .dot-core  { fill: #3b6d11; }
+  .cap-dot.wrong .dot-core    { fill: #a32d2d; }
+  .cap-dot .dot-ring  { fill: none; stroke: #e8a020; stroke-width: 1.5px; opacity: 0;
+                        transform-box: fill-box; transform-origin: center; }
+  .cap-dot.target .dot-ring   { animation: dot-pulse 1.1s ease-out infinite; }
+  @keyframes dot-pulse {
+    0%   { transform: scale(1);    opacity: 0.8; }
+    100% { transform: scale(3.5);  opacity: 0;   }
+  }
   .graticule { fill: none; stroke: #b8d9f0; stroke-width: 0.4px; pointer-events: none; }
   .sphere { fill: #d4eaf7; }
   .border { fill: none; stroke: #fff; stroke-width: 0.5px; pointer-events: none; }
@@ -101,6 +119,10 @@
   /* ── Lookup panel (country finder, shown in lookup mode) ── */
   #lookup-panel { display: none; }
   #lookup-panel.show { display: block; }
+  #lookup-subject-bar { display: flex; gap: 6px; margin-bottom: 8px; }
+  .lookup-subject-btn { padding: 4px 12px; border-radius: 20px; border: 1px solid #ccc;
+                        background: #fff; cursor: pointer; font-size: 12px; font-weight: 500; }
+  .lookup-subject-btn.active { background: #5b6af0; color: #fff; border-color: transparent; }
   #lookup-row { display: flex; gap: 8px; position: relative; margin-bottom: 6px; }
   #lookup-input { flex: 1; padding: 9px 13px; border-radius: 8px; border: 1px solid #ccc;
                   font-size: 14px; background: #fff; }
@@ -139,6 +161,11 @@
     <button class="mode-btn" id="btn-click"  onclick="setMode('click')">Click the country</button>
     <button class="mode-btn" id="btn-name"   onclick="setMode('name')">Name the country</button>
     <button class="mode-btn" id="btn-lookup" onclick="setMode('lookup')">🔍 Look up a country</button>
+  </div>
+
+  <div id="subject-bar" style="display:none">
+    <button class="subject-btn active" id="btn-countries" onclick="setSubject('country')">🌍 Countries</button>
+    <button class="subject-btn"        id="btn-capitals"  onclick="setSubject('capital')">🏛 Capitals</button>
   </div>
 
   <div id="region-bar">
@@ -194,6 +221,10 @@
   </div>
 
   <div id="lookup-panel">
+    <div id="lookup-subject-bar">
+      <button class="lookup-subject-btn active" id="lbtn-country" onclick="setLookupSubject('country')">🌍 Country</button>
+      <button class="lookup-subject-btn"        id="lbtn-capital" onclick="setLookupSubject('capital')">🏛 Capital</button>
+    </div>
     <div id="lookup-row">
       <input id="lookup-input" type="text" placeholder="Type a country name…" autocomplete="off"
              onkeydown="handleLookupKey(event)" oninput="onLookupInput()"/>
@@ -317,14 +348,180 @@ const COUNTRIES = {
   '036':'Australia','304':'Greenland',
 };
 
-let mode = 'click', region = 'All';
+// Capital cities keyed by the same ISO numeric IDs.
+// Policy: seat of government / de facto executive capital as canonical answer.
+// Alternatives (old names, co-capitals, common wrong answers) go in CAPITAL_ALIASES.
+const CAPITALS = {
+  // Americas
+  '032':'Buenos Aires','084':'Belmopan','068':'Sucre','076':'Brasília',
+  '124':'Ottawa','152':'Santiago','170':'Bogotá','188':'San José',
+  '192':'Havana','214':'Santo Domingo','218':'Quito','222':'San Salvador',
+  '320':'Guatemala City','328':'Georgetown','332':'Port-au-Prince','340':'Tegucigalpa',
+  '388':'Kingston','484':'Mexico City','558':'Managua','591':'Panama City',
+  '600':'Asunción','604':'Lima','630':'San Juan','740':'Paramaribo',
+  '780':'Port of Spain','840':'Washington D.C.','858':'Montevideo','862':'Caracas',
+  // Europe
+  '008':'Tirana','040':'Vienna','112':'Minsk','056':'Brussels',
+  '070':'Sarajevo','100':'Sofia','191':'Zagreb','196':'Nicosia',
+  '203':'Prague','208':'Copenhagen','233':'Tallinn','246':'Helsinki',
+  '250':'Paris','276':'Berlin','300':'Athens','348':'Budapest',
+  '352':'Reykjavik','372':'Dublin','380':'Rome','428':'Riga',
+  '440':'Vilnius','442':'Luxembourg City','470':'Valletta','498':'Chișinău',
+  '499':'Podgorica','528':'Amsterdam','807':'Skopje','578':'Oslo',
+  '616':'Warsaw','620':'Lisbon','642':'Bucharest','643':'Moscow',
+  '688':'Belgrade','703':'Bratislava','705':'Ljubljana','724':'Madrid',
+  '752':'Stockholm','756':'Bern','804':'Kyiv','826':'London',
+  '304':'Nuuk',
+  // Africa
+  '012':'Algiers','024':'Luanda','204':'Porto-Novo','072':'Gaborone',
+  '854':'Ouagadougou','108':'Gitega','120':'Yaoundé','140':'Bangui',
+  '148':"N'Djamena",'178':'Brazzaville','384':'Yamoussoukro','180':'Kinshasa',
+  '262':'Djibouti City','226':'Malabo','232':'Asmara','231':'Addis Ababa',
+  '266':'Libreville','270':'Banjul','288':'Accra','324':'Conakry',
+  '624':'Bissau','404':'Nairobi','426':'Maseru','430':'Monrovia',
+  '434':'Tripoli','450':'Antananarivo','454':'Lilongwe','466':'Bamako',
+  '478':'Nouakchott','504':'Rabat','508':'Maputo','516':'Windhoek',
+  '562':'Niamey','566':'Abuja','646':'Kigali','686':'Dakar',
+  '694':'Freetown','706':'Mogadishu','710':'Pretoria','728':'Juba',
+  '729':'Khartoum','834':'Dodoma','768':'Lomé','788':'Tunis',
+  '800':'Kampala','894':'Lusaka','716':'Harare',
+  // Middle East
+  '818':'Cairo','364':'Tehran','368':'Baghdad','376':'Jerusalem',
+  '400':'Amman','414':'Kuwait City','422':'Beirut','512':'Muscat',
+  '275':'Ramallah','634':'Doha','682':'Riyadh','760':'Damascus',
+  '784':'Abu Dhabi','887':"Sana'a",
+  // Asia / Middle East (as coded)
+  '004':'Kabul','051':'Yerevan','031':'Baku','050':'Dhaka',
+  '064':'Thimphu','096':'Bandar Seri Begawan','116':'Phnom Penh','156':'Beijing',
+  '268':'Tbilisi','356':'New Delhi','360':'Jakarta','392':'Tokyo',
+  '398':'Astana','417':'Bishkek','418':'Vientiane','458':'Kuala Lumpur',
+  '496':'Ulaanbaatar','104':'Naypyidaw','524':'Kathmandu','554':'Wellington',
+  '408':'Pyongyang','410':'Seoul','586':'Islamabad','598':'Port Moresby',
+  '608':'Manila','702':'Singapore','144':'Sri Jayawardenepura Kotte',
+  '158':'Taipei','762':'Dushanbe','764':'Bangkok','626':'Dili',
+  '792':'Ankara','795':'Ashgabat','860':'Tashkent','704':'Hanoi',
+  '242':'Suva','036':'Canberra',
+};
+
+// Alternate names, old capitals, common wrong answers, spelling variants.
+const CAPITAL_ALIASES = {
+  '068': ['la paz'],                              // co-capital / seat of govt
+  '076': ['brasilia'],                            // no accent
+  '084': ['belize city'],                         // former capital
+  '108': ['bujumbura'],                           // former capital, still used
+  '144': ['colombo', 'kotte'],                    // de facto / short form
+  '148': ['ndjamena'],                            // no apostrophe
+  '156': ['peking'],                              // old transliteration
+  '170': ['bogota'],                              // no accent
+  '188': ['san jose'],                            // no accent
+  '204': ['cotonou'],                             // seat of govt
+  '262': ['djibouti'],                            // short form
+  '384': ['abidjan'],                             // de facto capital
+  '398': ['nur-sultan', 'nursultan', 'alma-ata'], // renamed multiple times
+  '414': ['kuwait'],                              // short form
+  '417': ['frunze'],                              // Soviet-era name
+  '442': ['luxembourg'],                          // short form
+  '458': ['putrajaya'],                           // administrative capital
+  '498': ['chisinau', 'kishinev'],                // no diacritic / Russian name
+  '504': ['morocco'],                             // common wrong answer, not accepted — leave blank
+  '510': [],
+  '528': ['the hague', 'den haag'],               // seat of govt
+  '566': ['lagos'],                               // old capital, very common wrong answer — not accepted
+  '600': ['asuncion'],                            // no accent
+  '634': [],
+  '694': [],
+  '710': ['cape town', 'bloemfontein', 'tshwane'],// legislative / judicial capitals
+  '716': ['salisbury'],                           // colonial name
+  '734': [],
+  '760': ['dimashq'],
+  '780': [],
+  '804': ['kiev'],                                // old transliteration
+  '818': ['al qahirah'],
+  '834': ['dar es salaam'],                       // former capital, still major city
+  '840': ['washington', 'washington dc', 'dc'],
+  '887': ['sanaa'],                               // no apostrophe
+  '104': ['rangoon', 'yangon'],                   // old capital / former name
+  '268': ['tiflis'],                              // old name
+  '352': ['reykjavík'],                           // with accent
+  '364': ['teheran'],                             // alternate spelling
+  '376': ['tel aviv'],                            // commonly cited (wrong) answer
+  '392': [],
+  '404': [],
+  '496': ['ulan bator'],                          // old transliteration
+  '508': ['lourenco marques'],                    // colonial name
+  '524': ['katmandu'],                            // alternate spelling
+  '586': ['karachi'],                             // old capital
+  '596': [],
+  '620': ['lisboa'],
+  '626': [],
+  '642': ['bucuresti'],
+  '646': [],
+  '686': [],
+  '704': ['ha noi'],                              // two-word form
+  '764': ['krung thep'],                          // Thai name
+  '792': ['istanbul'],                            // very common wrong answer — NOT accepted; only Ankara
+  '795': ['ashkhabad'],                           // alternate spelling
+  '824': [],
+  '826': [],
+  '036': ['sydney'],                              // very common wrong answer — NOT accepted
+};
+
+// Lat/lng coordinates for each capital, keyed by country ID.
+// Format: [latitude, longitude] — WGS84.
+const CAPITAL_COORDS = {
+  '032':[-34.61,-58.37],'084':[17.25,-88.77],'068':[-19.03,-65.26],'076':[-15.78,-47.93],
+  '124':[45.42,-75.69],'152':[-33.45,-70.67],'170':[4.71,-74.07],'188':[9.93,-84.08],
+  '192':[23.13,-82.38],'214':[18.48,-69.90],'218':[-0.23,-78.52],'222':[13.69,-89.19],
+  '320':[14.64,-90.51],'328':[6.80,-58.15],'332':[18.54,-72.34],'340':[14.10,-87.21],
+  '388':[17.99,-76.79],'484':[19.43,-99.13],'558':[12.13,-86.29],'591':[8.99,-79.52],
+  '600':[-25.29,-57.65],'604':[-12.05,-77.04],'630':[18.47,-66.12],'740':[5.85,-55.20],
+  '780':[10.65,-61.52],'840':[38.91,-77.04],'858':[-34.90,-56.19],'862':[10.48,-66.88],
+  '008':[41.33,19.82],'040':[48.21,16.37],'112':[53.90,27.57],'056':[50.85,4.35],
+  '070':[43.85,18.36],'100':[42.70,23.32],'191':[45.81,15.98],'196':[35.17,33.37],
+  '203':[50.09,14.42],'208':[55.68,12.57],'233':[59.44,24.75],'246':[60.17,24.94],
+  '250':[48.85,2.35],'276':[52.52,13.41],'300':[37.98,23.73],'348':[47.50,19.04],
+  '352':[64.14,-21.94],'372':[53.33,-6.25],'380':[41.90,12.49],'428':[56.95,24.11],
+  '440':[54.69,25.28],'442':[49.61,6.13],'470':[35.90,14.51],'498':[47.01,28.86],
+  '499':[42.44,19.26],'528':[52.37,4.90],'807':[41.99,21.43],'578':[59.91,10.75],
+  '616':[52.23,21.01],'620':[38.72,-9.14],'642':[44.43,26.10],'643':[55.75,37.62],
+  '688':[44.80,20.46],'703':[48.15,17.11],'705':[46.05,14.51],'724':[40.42,-3.70],
+  '752':[59.33,18.07],'756':[46.95,7.45],'804':[50.45,30.52],'826':[51.51,-0.13],
+  '304':[64.18,-51.74],
+  '012':[36.74,3.06],'024':[-8.84,13.23],'204':[6.37,2.42],'072':[-24.65,25.91],
+  '854':[12.37,-1.52],'108':[-3.38,29.36],'120':[3.87,11.52],'140':[4.36,18.56],
+  '148':[12.11,15.04],'178':[-4.27,15.28],'384':[6.82,-5.27],'180':[-4.32,15.32],
+  '262':[11.59,43.15],'226':[3.75,8.78],'232':[15.34,38.93],'231':[9.03,38.74],
+  '266':[0.39,9.45],'270':[13.45,-16.58],'288':[5.55,-0.20],'324':[9.54,-13.68],
+  '624':[11.86,-15.60],'404':[-1.29,36.82],'426':[-29.32,27.48],'430':[6.30,-10.80],
+  '434':[32.90,13.18],'450':[-18.91,47.54],'454':[-13.97,33.79],'466':[12.65,-8.00],
+  '478':[18.08,-15.97],'504':[34.02,-6.85],'508':[-25.97,32.59],'516':[-22.56,17.08],
+  '562':[13.51,2.12],'566':[9.07,7.40],'646':[-1.95,30.06],'686':[14.73,-17.47],
+  '694':[8.49,-13.23],'706':[2.05,45.34],'710':[-25.74,28.19],'728':[4.86,31.57],
+  '729':[15.55,32.53],'834':[-6.18,35.74],'768':[6.14,1.22],'788':[36.82,10.18],
+  '800':[0.32,32.58],'894':[-15.42,28.28],'716':[-17.83,31.05],
+  '818':[30.06,31.25],'364':[35.69,51.42],'368':[33.34,44.40],'376':[31.77,35.21],
+  '400':[31.95,35.93],'414':[29.37,47.98],'422':[33.89,35.50],'512':[23.61,58.59],
+  '275':[31.90,35.20],'634':[25.29,51.53],'682':[24.69,46.72],'760':[33.51,36.29],
+  '784':[24.47,54.37],'887':[15.35,44.21],
+  '004':[34.53,69.17],'051':[40.18,44.51],'031':[40.41,49.87],'050':[23.72,90.41],
+  '064':[27.47,89.64],'096':[4.94,114.95],'116':[11.57,104.92],'156':[39.91,116.39],
+  '268':[41.69,44.83],'356':[28.64,77.22],'360':[-6.21,106.85],'392':[35.69,139.69],
+  '398':[51.18,71.45],'417':[42.87,74.59],'418':[17.97,102.60],'458':[3.15,101.70],
+  '496':[47.91,106.92],'104':[19.79,96.16],'524':[27.71,85.32],'554':[-41.29,174.78],
+  '408':[39.02,125.75],'410':[37.57,126.98],'586':[33.72,73.04],'598':[-9.44,147.18],
+  '608':[14.60,120.98],'702':[1.29,103.85],'144':[6.90,79.86],'158':[25.05,121.53],
+  '762':[38.56,68.77],'764':[13.75,100.52],'626':[-8.56,125.58],'792':[39.93,32.86],
+  '795':[37.95,58.38],'860':[41.30,69.27],'704':[21.03,105.85],'242':[-18.14,178.44],
+  '036':[-35.31,149.12],
+};
 let score = 0, round = 0, streak = 0, attempts = 0;
 let currentId = '', questionPool = [], geoIndex = {}, gameOver = false;
 let pendingTimeout = null;
 
 const mapWrap = document.getElementById('map-wrap');
 const svgEl   = document.getElementById('world-svg');
-let W, H, projection, pathGen, zoomBehavior, mapGroup;
+let W, H, projection, pathGen, zoomBehavior, mapGroup, capDotGroup;
+let dotIndex = {};  // id → { g, core, ring } SVG elements
 
 function initMap() {
   W = mapWrap.clientWidth;
@@ -372,6 +569,11 @@ function initMap() {
       mapGroup.selectAll('.border').style('stroke-width', (0.5 / k) + 'px');
       mapGroup.selectAll('.country-bg').style('stroke-width', (0.5 / k) + 'px');
       mapGroup.selectAll('[stroke="#7aaecc"]').style('stroke-width', (0.6 / k) + 'px');
+      // Counter-scale each dot group so dots stay pixel-constant at all zoom levels
+      mapGroup.selectAll('.cap-dot').attr('transform', function() {
+        const tx = this.getAttribute('data-tx'), ty = this.getAttribute('data-ty');
+        return `translate(${tx},${ty}) scale(${1/k})`;
+      });
     })
     .on('start', () => mapWrap.classList.add('dragging'))
     .on('end',   () => mapWrap.classList.remove('dragging'));
@@ -425,6 +627,106 @@ function zoomToCountry(id) {
   zoomToBox(x0, y0, x1, y1, 700);
 }
 
+// ── Capital dot layer ─────────────────────────────────────────────────────────
+function buildCapitalDots() {
+  dotIndex = {};
+  Object.entries(CAPITAL_COORDS).forEach(([id, [lat, lng]]) => {
+    const [px, py] = projection([lng, lat]);
+    if (!isFinite(px) || !isFinite(py)) return;
+
+    const g = capDotGroup.append('g')
+      .attr('class', 'cap-dot')
+      .attr('data-id', id)
+      .attr('data-tx', px)
+      .attr('data-ty', py)
+      .attr('transform', `translate(${px},${py})`);
+
+    // Expanding ring (pulse animation — transform:scale via CSS class)
+    const ring = g.append('circle')
+      .attr('class', 'dot-ring')
+      .attr('r', 5)
+      .attr('fill', 'none')
+      .attr('stroke', '#e8a020')
+      .attr('stroke-width', 1.5)
+      .attr('opacity', 0);
+
+    // Invisible hit-area circle — larger target for easier clicking
+    g.append('circle')
+      .attr('r', 7)
+      .attr('fill', 'none')
+      .attr('stroke', 'none')
+      .attr('pointer-events', 'all');
+
+    // Visible core dot
+    const core = g.append('circle')
+      .attr('class', 'dot-core')
+      .attr('r', 4)
+      .attr('fill', '#e8a020')
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 1);
+
+    g.on('click', (event) => {
+      event.stopPropagation();
+      handleDotClick(id);
+    });
+
+    dotIndex[id] = { g, core, ring };
+  });
+  showCapitalDots(false); // hidden by default
+}
+
+// Show or hide the entire dot layer, and set pointer-events accordingly
+function showCapitalDots(visible) {
+  capDotGroup.attr('visibility', visible ? 'visible' : 'hidden');
+  capDotGroup.selectAll('.cap-dot').classed('clickable', visible);
+}
+
+// Set a dot's visual state: 'idle' | 'target' | 'correct' | 'wrong'
+const DOT_COLORS = { idle: '#e8a020', target: '#e8a020', correct: '#3b6d11', wrong: '#a32d2d' };
+function setDotState(id, state) {
+  const entry = dotIndex[id];
+  if (!entry) return;
+  const isClickable = capDotGroup.select('.cap-dot').classed('clickable');
+  entry.g.attr('class', `cap-dot${state !== 'idle' ? ' ' + state : ''}${isClickable ? ' clickable' : ''}`);
+  // Drive fill directly so state is visible regardless of CSS specificity
+  const color = DOT_COLORS[state] || '#e8a020';
+  entry.core.attr('fill', color);
+  entry.ring.attr('stroke', color)
+    .attr('opacity', state === 'target' ? null : 0);  // null lets CSS animation control it
+}
+
+// Reset all dots to idle state
+function resetDots() {
+  Object.keys(dotIndex).forEach(id => setDotState(id, 'idle'));
+}
+
+// Zoom to a capital dot's projected position
+function zoomToDot(id) {
+  const coords = CAPITAL_COORDS[id];
+  if (!coords) return;
+  const [px, py] = projection([coords[1], coords[0]]);
+  if (!isFinite(px) || !isFinite(py)) return;
+  const scale = Math.min(8, 0.15);  // comfortable zoom for a point
+  d3.select(svgEl).transition().duration(700)
+    .call(zoomBehavior.transform,
+      d3.zoomIdentity.translate(W / 2, H / 2).scale(8).translate(-px, -py));
+}
+
+function handleDotClick(id) {
+  if (mode !== 'click' || subject !== 'capital' || gameOver) return;
+  if (id === currentId) {
+    setDotState(id, 'correct');
+    awardCorrect(id);
+  } else {
+    attempts++;
+    setDotState(id, 'wrong');
+    if (attempts >= MAX_ATTEMPTS) { markFail(); return; }
+    const left = MAX_ATTEMPTS - attempts;
+    setFeedback(`Wrong! ${left} attempt${left===1?'':'s'} left.`, 'bad');
+    updateHUD();
+  }
+}
+
 async function loadMap() {
   initMap();
   const world = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json');
@@ -473,6 +775,10 @@ async function loadMap() {
     .attr('class','border')
     .attr('d', pathGen);
 
+  // Capital dot layer — above country paths, counter-scaled per zoom
+  capDotGroup = mapGroup.append('g').attr('id', 'cap-dots');
+  buildCapitalDots();
+
   initIdle();
 }
 
@@ -500,12 +806,14 @@ function startGame() {
   score = 0; round = 0; streak = 0; attempts = 0; gameOver = false;
   // Grey out lookup during game; restore game chrome visibility
   document.getElementById('btn-lookup').disabled = true;
+  document.getElementById('subject-bar').style.display = '';
   document.getElementById('region-bar').style.display = '';
   document.getElementById('hud').style.display = '';
   document.getElementById('prompt-box').style.display = '';
   document.getElementById('action-row').style.display = '';
   document.getElementById('feedback').style.display = '';
-  document.getElementById('mode-label').textContent = mode === 'click' ? 'Click' : 'Name';
+  const modeLabel = (mode === 'click' ? 'Click' : 'Name') + (subject === 'capital' ? ' · Capital' : '');
+  document.getElementById('mode-label').textContent = modeLabel;
   const pool = region === 'All'
     ? Object.keys(COUNTRIES)
     : Object.keys(COUNTRIES).filter(id => COUNTRY_REGIONS[id] === region);
@@ -513,6 +821,7 @@ function startGame() {
   document.getElementById('scoreboard').classList.remove('show');
   document.getElementById('total-disp').textContent = ROUNDS;
   zoomToRegion(region, 400);
+  if (dotIndex) showCapitalDots(false); // nextRound will show them if needed
   updateHUD();
   nextRound();
 }
@@ -524,6 +833,7 @@ function resetClasses() {
   Object.entries(geoIndex).forEach(([id, {path}]) => {
     path.attr('class', inRegion && !inRegion.has(id) ? 'country dimmed' : 'country');
   });
+  resetDots();
 }
 
 function nextRound() {
@@ -534,21 +844,49 @@ function nextRound() {
   currentId = questionPool[round];
   round++;
   updateHUD();
-  const name = COUNTRIES[currentId];
+  const countryName = COUNTRIES[currentId];
+  const capitalName = CAPITALS[currentId];
 
   if (mode === 'click') {
-    document.getElementById('prompt-text').textContent = `Find and click: ${name}`;
-    document.getElementById('name-row').style.display = 'none';
-    document.getElementById('skip-btn').style.display = '';
-    zoomToRegion(region, 400);
+    if (subject === 'capital') {
+      // click+capital: show all dots as idle (no pulse — player must find it)
+      // zoom to region so player searches the map, not handed the answer
+      document.getElementById('prompt-text').textContent = `Find the capital: ${capitalName}`;
+      document.getElementById('name-row').style.display = 'none';
+      document.getElementById('skip-btn').style.display = '';
+      showCapitalDots(true);
+      zoomToRegion(region, 400);
+    } else {
+      // click+country: "Find and click: France" — no dots
+      showCapitalDots(false);
+      document.getElementById('prompt-text').textContent = `Find and click: ${countryName}`;
+      document.getElementById('name-row').style.display = 'none';
+      document.getElementById('skip-btn').style.display = '';
+      zoomToRegion(region, 400);
+    }
   } else {
+    // name+country: country highlighted → type name; no dots
+    // name+capital: country highlighted → type capital; show all dots, pulse target
     if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
-    document.getElementById('prompt-text').textContent = 'Which country is highlighted in orange?';
+    const prompt = subject === 'capital'
+      ? `What is the capital of ${countryName}?`
+      : 'Which country is highlighted in orange?';
+    document.getElementById('prompt-text').textContent = prompt;
+    document.getElementById('guess-input').placeholder = subject === 'capital'
+      ? 'Type capital city…'
+      : 'Type country name…';
     document.getElementById('name-row').style.display = 'flex';
     document.getElementById('skip-btn').style.display = 'none';
     document.getElementById('guess-input').value = '';
     setTimeout(() => document.getElementById('guess-input').focus(), 50);
-    zoomToCountry(currentId);
+    if (subject === 'capital') {
+      showCapitalDots(true);
+      setDotState(currentId, 'target');
+      zoomToCountry(currentId);
+    } else {
+      showCapitalDots(false);
+      zoomToCountry(currentId);
+    }
   }
 }
 
@@ -653,11 +991,39 @@ function isCorrectGuess(guess, targetId) {
   return true;
 }
 
+// Same three-layer system for capital guesses.
+// Uniqueness gate checks against all other capital names (not country names).
+function isCorrectCapital(guess, targetId) {
+  const g = normaliseGuess(guess);
+  const canonical = normaliseGuess(CAPITALS[targetId]);
+
+  if (g === canonical) return true;
+  if ((CAPITAL_ALIASES[targetId] || []).includes(g)) return true;
+
+  const thresh = fuzzyThreshold(canonical);
+  if (thresh === 0) return false;
+
+  const dToTarget = osa(g, canonical);
+  if (dToTarget > thresh) return false;
+
+  for (const [id, cap] of Object.entries(CAPITALS)) {
+    if (id === targetId) continue;
+    if (osa(g, normaliseGuess(cap)) <= dToTarget) return false;
+    for (const alias of (CAPITAL_ALIASES[id] || [])) {
+      if (osa(g, alias) <= dToTarget) return false;
+    }
+  }
+  return true;
+}
+
 function checkName() {
   if (mode !== 'name' || gameOver) return;
   const val = document.getElementById('guess-input').value.trim();
   if (!val) return;
-  if (isCorrectGuess(val, currentId)) {
+  const correct = subject === 'capital'
+    ? isCorrectCapital(val, currentId)
+    : isCorrectGuess(val, currentId);
+  if (correct) {
     if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country correct');
     awardCorrect(currentId);
   } else {
@@ -683,8 +1049,21 @@ function awardCorrect(id) {
 
 // Show the correct country after a wrong answer or skip:
 // zooms it into view (always, regardless of size) then pulses it for 3 s.
+// Also pulses the capital dot when in a capital mode.
 function revealCountry(id) {
   if (geoIndex[id]) geoIndex[id].path.attr('class', 'country reveal');
+
+  // Also mark the dot as target (pulsing) for capital modes
+  if (subject === 'capital') {
+    showCapitalDots(true);
+    setDotState(id, 'target');
+  }
+
+  if (subject === 'capital' && mode === 'click') {
+    // In click+capital mode the country wasn't highlighted — zoom to the dot
+    zoomToDot(id);
+    return;
+  }
 
   // Zoom to fit — use a gentler max scale (6) so small countries aren't over-zoomed,
   // and always zoom even if the country is tiny (no bw/bh guard here).
@@ -714,7 +1093,10 @@ function revealCountry(id) {
 function markFail() {
   streak = 0;
   revealCountry(currentId);
-  setFeedback(`It was ${COUNTRIES[currentId]}`, 'bad');
+  const answer = subject === 'capital'
+    ? `${CAPITALS[currentId]} (capital of ${COUNTRIES[currentId]})`
+    : COUNTRIES[currentId];
+  setFeedback(`It was ${answer}`, 'bad');
   updateHUD();
   pendingTimeout = setTimeout(nextRound, 3000);
 }
@@ -722,7 +1104,10 @@ function markFail() {
 function skipQuestion() {
   streak = 0;
   revealCountry(currentId);
-  setFeedback(`Skipped — it was ${COUNTRIES[currentId]}`, 'bad');
+  const answer = subject === 'capital'
+    ? `${CAPITALS[currentId]} (capital of ${COUNTRIES[currentId]})`
+    : COUNTRIES[currentId];
+  setFeedback(`Skipped — it was ${answer}`, 'bad');
   updateHUD();
   pendingTimeout = setTimeout(nextRound, 3000);
 }
@@ -738,7 +1123,8 @@ function endGame() {
   document.getElementById('score-sub').textContent = `points (${pct}% of ${maxP} possible)`;
   document.getElementById('breakdown').innerHTML =
     `${ROUNDS} rounds &nbsp;·&nbsp; ${MAX_ATTEMPTS} attempts per round<br>` +
-    `Mode: ${mode === 'click' ? 'Click the country' : 'Name the country'} &nbsp;·&nbsp; Region: ${region}`;
+    `Mode: ${mode === 'click' ? 'Click the country' : 'Name the country'} &nbsp;·&nbsp; ` +
+    `Subject: ${subject === 'capital' ? 'Capitals' : 'Countries'} &nbsp;·&nbsp; Region: ${region}`;
   document.getElementById('scoreboard').classList.add('show');
 }
 
@@ -773,19 +1159,22 @@ function setMode(m) {
   document.getElementById('btn-lookup').disabled = gameRunning;
 
   // Show/hide game chrome
-  document.getElementById('region-bar').style.display  = isLookup || isIdle ? 'none' : '';
-  document.getElementById('hud').style.display         = isLookup || isIdle ? 'none' : '';
-  document.getElementById('prompt-box').style.display  = isLookup || isIdle ? 'none' : '';
-  document.getElementById('name-row').style.display    = 'none'; // nextRound manages this
-  document.getElementById('action-row').style.display  = isLookup || isIdle ? 'none' : '';
-  document.getElementById('feedback').style.display    = isLookup || isIdle ? 'none' : '';
+  document.getElementById('subject-bar').style.display  = isGame ? '' : 'none';
+  document.getElementById('region-bar').style.display   = isLookup || isIdle ? 'none' : '';
+  document.getElementById('hud').style.display          = isLookup || isIdle ? 'none' : '';
+  document.getElementById('prompt-box').style.display   = isLookup || isIdle ? 'none' : '';
+  document.getElementById('name-row').style.display     = 'none'; // nextRound manages this
+  document.getElementById('action-row').style.display   = isLookup || isIdle ? 'none' : '';
+  document.getElementById('feedback').style.display     = isLookup || isIdle ? 'none' : '';
 
   // Show/hide lookup panel
   if (isLookup) {
     document.getElementById('scoreboard').classList.remove('show');
+    if (dotIndex) showCapitalDots(true);   // dots always visible in lookup for reference
     showLookup();
   } else {
     hideLookup();
+    if (dotIndex) showCapitalDots(false);  // hidden until a game round needs them
   }
 
   // Idle welcome state — map loaded, nothing started yet
@@ -801,6 +1190,13 @@ function setMode(m) {
   if (isGame) startGame();
 }
 
+function setSubject(s) {
+  subject = s;
+  document.getElementById('btn-countries').classList.toggle('active', s === 'country');
+  document.getElementById('btn-capitals').classList.toggle('active', s === 'capital');
+  if (mode === 'click' || mode === 'name') startGame();
+}
+
 function initIdle() {
   setMode('idle');
 }
@@ -813,13 +1209,23 @@ const lookupFeedback   = document.getElementById('lookup-feedback');
 
 let lookupHighlightedId = null;   // currently pulsing country
 let suggestionIndex = -1;         // keyboard-navigated suggestion row
+let lookupSubject = 'country';    // 'country' | 'capital'
 
-function showLookup() {
-  lookupPanel.classList.add('show');
+function setLookupSubject(s) {
+  lookupSubject = s;
+  document.getElementById('lbtn-country').classList.toggle('active', s === 'country');
+  document.getElementById('lbtn-capital').classList.toggle('active', s === 'capital');
+  lookupInput.placeholder = s === 'capital' ? 'Type a capital city…' : 'Type a country name…';
   lookupInput.value = '';
   lookupFeedback.textContent = '';
   hideSuggestions();
-  lookupHighlightedId = null;
+  clearLookupHighlight();
+}
+
+function showLookup() {
+  lookupPanel.classList.add('show');
+  setLookupSubject('country');   // always reset to country on open
+  lookupInput.focus();
 }
 
 function hideLookup() {
@@ -831,6 +1237,7 @@ function clearLookupHighlight() {
   if (lookupHighlightedId) {
     const entry = geoIndex[lookupHighlightedId];
     if (entry) entry.path.attr('class', 'country');
+    setDotState(lookupHighlightedId, 'idle');
     lookupHighlightedId = null;
   }
 }
@@ -841,45 +1248,87 @@ function hideSuggestions() {
   suggestionIndex = -1;
 }
 
-// Filter country names as user types — show up to 7 matches
+// Filter names as user types — searches countries or capitals depending on lookupSubject
 function onLookupInput() {
   const raw = lookupInput.value.trim();
   if (raw.length < 1) { hideSuggestions(); return; }
   const q = normaliseGuess(raw);
 
-  const matches = Object.entries(COUNTRIES)
-    .filter(([id, name]) => normaliseGuess(name).includes(q)
-      || (ALIASES[id] || []).some(a => a.includes(q)))
-    .sort(([,a],[,b]) => {
-      // Exact-start matches first, then alphabetical
-      const aStarts = normaliseGuess(a).startsWith(q);
-      const bStarts = normaliseGuess(b).startsWith(q);
-      if (aStarts !== bStarts) return aStarts ? -1 : 1;
-      return a.localeCompare(b);
-    })
-    .slice(0, 7);
+  let matches;
+  if (lookupSubject === 'capital') {
+    // Search capital names and their aliases; label shows "Capital — Country"
+    matches = Object.entries(CAPITALS)
+      .filter(([id, cap]) => normaliseGuess(cap).includes(q)
+        || (CAPITAL_ALIASES[id] || []).some(a => a.includes(q)))
+      .sort(([,a],[,b]) => {
+        const aStarts = normaliseGuess(a).startsWith(q);
+        const bStarts = normaliseGuess(b).startsWith(q);
+        if (aStarts !== bStarts) return aStarts ? -1 : 1;
+        return a.localeCompare(b);
+      })
+      .slice(0, 7)
+      .map(([id, cap]) => ({ id, label: `${cap} — ${COUNTRIES[id]}` }));
+  } else {
+    // Search country names and their aliases; label shows country name only
+    matches = Object.entries(COUNTRIES)
+      .filter(([id, name]) => normaliseGuess(name).includes(q)
+        || (ALIASES[id] || []).some(a => a.includes(q)))
+      .sort(([,a],[,b]) => {
+        const aStarts = normaliseGuess(a).startsWith(q);
+        const bStarts = normaliseGuess(b).startsWith(q);
+        if (aStarts !== bStarts) return aStarts ? -1 : 1;
+        return a.localeCompare(b);
+      })
+      .slice(0, 7)
+      .map(([id, name]) => ({ id, label: name }));
+  }
 
   if (!matches.length) { hideSuggestions(); return; }
 
   lookupSuggestions.innerHTML = '';
   suggestionIndex = -1;
-  matches.forEach(([id, name]) => {
+  matches.forEach(({ id, label }) => {
     const li = document.createElement('li');
     li.className = 'lookup-item';
-    li.textContent = name;
+    li.textContent = label;
     li.addEventListener('mousedown', (e) => {
-      e.preventDefault(); // prevent input blur before click registers
-      selectSuggestion(id, name);
+      e.preventDefault();
+      lookupInput.value = label;
+      hideSuggestions();
+      performLookup(id);
     });
     lookupSuggestions.appendChild(li);
   });
   lookupSuggestions.classList.add('show');
 }
 
-function selectSuggestion(id, name) {
-  lookupInput.value = name;
+// Called by the Find button
+function doLookup() {
   hideSuggestions();
-  performLookup(id);
+  const raw = lookupInput.value.trim();
+  if (!raw) return;
+
+  let found;
+  if (lookupSubject === 'capital') {
+    // Search capital names+aliases first, then fall back to country names
+    // so typing "Paris" in capital mode finds France, not a country called Paris
+    found = Object.keys(CAPITALS).find(id => isCorrectCapital(raw, id))
+         || Object.keys(COUNTRIES).find(id => isCorrectGuess(raw, id));
+  } else {
+    // Country mode: search country names+aliases; also catch capital names so
+    // e.g. typing "Paris" while in country mode still finds France helpfully
+    found = Object.keys(COUNTRIES).find(id => isCorrectGuess(raw, id))
+         || Object.keys(CAPITALS).find(id => isCorrectCapital(raw, id));
+  }
+
+  if (found) {
+    performLookup(found);
+  } else {
+    const what = lookupSubject === 'capital' ? 'capital or country' : 'country or capital';
+    lookupFeedback.textContent = `Nothing found for "${raw}". Try a ${what} name.`;
+    lookupFeedback.style.color = '#a32d2d';
+    clearLookupHighlight();
+  }
 }
 
 // Arrow-key / Enter navigation within the suggestion list
@@ -905,37 +1354,24 @@ function handleLookupKey(e) {
   }
 }
 
-// Called by the Find button
-function doLookup() {
-  hideSuggestions();
-  const raw = lookupInput.value.trim();
-  if (!raw) return;
-
-  // Find the first country whose name or alias matches (exact/fuzzy via isCorrectGuess)
-  const found = Object.keys(COUNTRIES).find(id => isCorrectGuess(raw, id));
-  if (found) {
-    performLookup(found);
-  } else {
-    lookupFeedback.textContent = `No country found for "${raw}".`;
-    lookupFeedback.style.color = '#a32d2d';
-    clearLookupHighlight();
-  }
-}
-
 function performLookup(id) {
   // Clear previous highlight across the whole map
   Object.values(geoIndex).forEach(({ path }) => path.attr('class', 'country'));
+  resetDots();
 
   lookupHighlightedId = id;
-  // Reuse revealCountry for the pulse + zoom-to-fit behaviour
   revealCountry(id);
-  lookupFeedback.textContent = `Showing: ${COUNTRIES[id]} (${COUNTRY_REGIONS[id]})`;
+  setDotState(id, 'target');   // pulse the capital dot too
+  const capital = CAPITALS[id];
+  lookupFeedback.textContent = `${COUNTRIES[id]} · Capital: ${capital} · ${COUNTRY_REGIONS[id]}`;
   lookupFeedback.style.color = '#0f6e56';
 }
 
 loadMap().catch(err => {
+  document.getElementById('prompt-box').style.display = '';
   document.getElementById('prompt-text').textContent =
-    'Failed to load map. Check internet connection and reload.';
+    '⚠️ Map failed to load. Open this file in a browser (not a preview) — it requires internet access for map data.';
+  document.getElementById('mode-label').textContent = '';
   console.error(err);
 });
 </script>
