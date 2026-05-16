@@ -105,6 +105,10 @@
   /* ── Lookup panel (country finder, shown in lookup mode) ── */
   #lookup-panel { display: none; }
   #lookup-panel.show { display: block; }
+  #lookup-subject-bar { display: flex; gap: 6px; margin-bottom: 8px; }
+  .lookup-subject-btn { padding: 4px 12px; border-radius: 20px; border: 1px solid #ccc;
+                        background: #fff; cursor: pointer; font-size: 12px; font-weight: 500; }
+  .lookup-subject-btn.active { background: #5b6af0; color: #fff; border-color: transparent; }
   #lookup-row { display: flex; gap: 8px; position: relative; margin-bottom: 6px; }
   #lookup-input { flex: 1; padding: 9px 13px; border-radius: 8px; border: 1px solid #ccc;
                   font-size: 14px; background: #fff; }
@@ -203,6 +207,10 @@
   </div>
 
   <div id="lookup-panel">
+    <div id="lookup-subject-bar">
+      <button class="lookup-subject-btn active" id="lbtn-country" onclick="setLookupSubject('country')">🌍 Country</button>
+      <button class="lookup-subject-btn"        id="lbtn-capital" onclick="setLookupSubject('capital')">🏛 Capital</button>
+    </div>
     <div id="lookup-row">
       <input id="lookup-input" type="text" placeholder="Type a country name…" autocomplete="off"
              onkeydown="handleLookupKey(event)" oninput="onLookupInput()"/>
@@ -999,13 +1007,23 @@ const lookupFeedback   = document.getElementById('lookup-feedback');
 
 let lookupHighlightedId = null;   // currently pulsing country
 let suggestionIndex = -1;         // keyboard-navigated suggestion row
+let lookupSubject = 'country';    // 'country' | 'capital'
 
-function showLookup() {
-  lookupPanel.classList.add('show');
+function setLookupSubject(s) {
+  lookupSubject = s;
+  document.getElementById('lbtn-country').classList.toggle('active', s === 'country');
+  document.getElementById('lbtn-capital').classList.toggle('active', s === 'capital');
+  lookupInput.placeholder = s === 'capital' ? 'Type a capital city…' : 'Type a country name…';
   lookupInput.value = '';
   lookupFeedback.textContent = '';
   hideSuggestions();
-  lookupHighlightedId = null;
+  clearLookupHighlight();
+}
+
+function showLookup() {
+  lookupPanel.classList.add('show');
+  setLookupSubject('country');   // always reset to country on open
+  lookupInput.focus();
 }
 
 function hideLookup() {
@@ -1027,45 +1045,87 @@ function hideSuggestions() {
   suggestionIndex = -1;
 }
 
-// Filter country names as user types — show up to 7 matches
+// Filter names as user types — searches countries or capitals depending on lookupSubject
 function onLookupInput() {
   const raw = lookupInput.value.trim();
   if (raw.length < 1) { hideSuggestions(); return; }
   const q = normaliseGuess(raw);
 
-  const matches = Object.entries(COUNTRIES)
-    .filter(([id, name]) => normaliseGuess(name).includes(q)
-      || (ALIASES[id] || []).some(a => a.includes(q)))
-    .sort(([,a],[,b]) => {
-      // Exact-start matches first, then alphabetical
-      const aStarts = normaliseGuess(a).startsWith(q);
-      const bStarts = normaliseGuess(b).startsWith(q);
-      if (aStarts !== bStarts) return aStarts ? -1 : 1;
-      return a.localeCompare(b);
-    })
-    .slice(0, 7);
+  let matches;
+  if (lookupSubject === 'capital') {
+    // Search capital names and their aliases; label shows "Capital — Country"
+    matches = Object.entries(CAPITALS)
+      .filter(([id, cap]) => normaliseGuess(cap).includes(q)
+        || (CAPITAL_ALIASES[id] || []).some(a => a.includes(q)))
+      .sort(([,a],[,b]) => {
+        const aStarts = normaliseGuess(a).startsWith(q);
+        const bStarts = normaliseGuess(b).startsWith(q);
+        if (aStarts !== bStarts) return aStarts ? -1 : 1;
+        return a.localeCompare(b);
+      })
+      .slice(0, 7)
+      .map(([id, cap]) => ({ id, label: `${cap} — ${COUNTRIES[id]}` }));
+  } else {
+    // Search country names and their aliases; label shows country name only
+    matches = Object.entries(COUNTRIES)
+      .filter(([id, name]) => normaliseGuess(name).includes(q)
+        || (ALIASES[id] || []).some(a => a.includes(q)))
+      .sort(([,a],[,b]) => {
+        const aStarts = normaliseGuess(a).startsWith(q);
+        const bStarts = normaliseGuess(b).startsWith(q);
+        if (aStarts !== bStarts) return aStarts ? -1 : 1;
+        return a.localeCompare(b);
+      })
+      .slice(0, 7)
+      .map(([id, name]) => ({ id, label: name }));
+  }
 
   if (!matches.length) { hideSuggestions(); return; }
 
   lookupSuggestions.innerHTML = '';
   suggestionIndex = -1;
-  matches.forEach(([id, name]) => {
+  matches.forEach(({ id, label }) => {
     const li = document.createElement('li');
     li.className = 'lookup-item';
-    li.textContent = name;
+    li.textContent = label;
     li.addEventListener('mousedown', (e) => {
-      e.preventDefault(); // prevent input blur before click registers
-      selectSuggestion(id, name);
+      e.preventDefault();
+      lookupInput.value = label;
+      hideSuggestions();
+      performLookup(id);
     });
     lookupSuggestions.appendChild(li);
   });
   lookupSuggestions.classList.add('show');
 }
 
-function selectSuggestion(id, name) {
-  lookupInput.value = name;
+// Called by the Find button
+function doLookup() {
   hideSuggestions();
-  performLookup(id);
+  const raw = lookupInput.value.trim();
+  if (!raw) return;
+
+  let found;
+  if (lookupSubject === 'capital') {
+    // Search capital names+aliases first, then fall back to country names
+    // so typing "Paris" in capital mode finds France, not a country called Paris
+    found = Object.keys(CAPITALS).find(id => isCorrectCapital(raw, id))
+         || Object.keys(COUNTRIES).find(id => isCorrectGuess(raw, id));
+  } else {
+    // Country mode: search country names+aliases; also catch capital names so
+    // e.g. typing "Paris" while in country mode still finds France helpfully
+    found = Object.keys(COUNTRIES).find(id => isCorrectGuess(raw, id))
+         || Object.keys(CAPITALS).find(id => isCorrectCapital(raw, id));
+  }
+
+  if (found) {
+    performLookup(found);
+  } else {
+    const what = lookupSubject === 'capital' ? 'capital or country' : 'country or capital';
+    lookupFeedback.textContent = `Nothing found for "${raw}". Try a ${what} name.`;
+    lookupFeedback.style.color = '#a32d2d';
+    clearLookupHighlight();
+  }
 }
 
 // Arrow-key / Enter navigation within the suggestion list
@@ -1091,31 +1151,15 @@ function handleLookupKey(e) {
   }
 }
 
-// Called by the Find button
-function doLookup() {
-  hideSuggestions();
-  const raw = lookupInput.value.trim();
-  if (!raw) return;
-
-  // Find the first country whose name or alias matches (exact/fuzzy via isCorrectGuess)
-  const found = Object.keys(COUNTRIES).find(id => isCorrectGuess(raw, id));
-  if (found) {
-    performLookup(found);
-  } else {
-    lookupFeedback.textContent = `No country found for "${raw}".`;
-    lookupFeedback.style.color = '#a32d2d';
-    clearLookupHighlight();
-  }
-}
-
 function performLookup(id) {
   // Clear previous highlight across the whole map
   Object.values(geoIndex).forEach(({ path }) => path.attr('class', 'country'));
 
   lookupHighlightedId = id;
-  // Reuse revealCountry for the pulse + zoom-to-fit behaviour
   revealCountry(id);
-  lookupFeedback.textContent = `Showing: ${COUNTRIES[id]} (${COUNTRY_REGIONS[id]})`;
+  const region = COUNTRY_REGIONS[id];
+  const capital = CAPITALS[id];
+  lookupFeedback.textContent = `${COUNTRIES[id]} · Capital: ${capital} · ${region}`;
   lookupFeedback.style.color = '#0f6e56';
 }
 
