@@ -59,6 +59,20 @@
     to   { fill: #ff9500; }
   }
 
+  /* ── Capital dot layer ── */
+  .cap-dot            { cursor: default; }
+  .cap-dot.clickable  { cursor: crosshair; }
+  .cap-dot .dot-core  { fill: #e8a020; stroke: #fff; stroke-width: 1px; transition: fill 0.15s; }
+  .cap-dot.target .dot-core   { fill: #e8a020; }
+  .cap-dot.correct .dot-core  { fill: #3b6d11; }
+  .cap-dot.wrong .dot-core    { fill: #a32d2d; }
+  .cap-dot .dot-ring  { fill: none; stroke: #e8a020; stroke-width: 1.5px; opacity: 0;
+                        transform-box: fill-box; transform-origin: center; }
+  .cap-dot.target .dot-ring   { animation: dot-pulse 1.1s ease-out infinite; }
+  @keyframes dot-pulse {
+    0%   { transform: scale(1);    opacity: 0.8; }
+    100% { transform: scale(3.5);  opacity: 0;   }
+  }
   .graticule { fill: none; stroke: #b8d9f0; stroke-width: 0.4px; pointer-events: none; }
   .sphere { fill: #d4eaf7; }
   .border { fill: none; stroke: #fff; stroke-width: 0.5px; pointer-events: none; }
@@ -452,14 +466,62 @@ const CAPITAL_ALIASES = {
   '036': ['sydney'],                              // very common wrong answer — NOT accepted
 };
 
-let mode = 'click', region = 'All', subject = 'country';
+// Lat/lng coordinates for each capital, keyed by country ID.
+// Format: [latitude, longitude] — WGS84.
+const CAPITAL_COORDS = {
+  '032':[-34.61,-58.37],'084':[17.25,-88.77],'068':[-19.03,-65.26],'076':[-15.78,-47.93],
+  '124':[45.42,-75.69],'152':[-33.45,-70.67],'170':[4.71,-74.07],'188':[9.93,-84.08],
+  '192':[23.13,-82.38],'214':[18.48,-69.90],'218':[-0.23,-78.52],'222':[13.69,-89.19],
+  '320':[14.64,-90.51],'328':[6.80,-58.15],'332':[18.54,-72.34],'340':[14.10,-87.21],
+  '388':[17.99,-76.79],'484':[19.43,-99.13],'558':[12.13,-86.29],'591':[8.99,-79.52],
+  '600':[-25.29,-57.65],'604':[-12.05,-77.04],'630':[18.47,-66.12],'740':[5.85,-55.20],
+  '780':[10.65,-61.52],'840':[38.91,-77.04],'858':[-34.90,-56.19],'862':[10.48,-66.88],
+  '008':[41.33,19.82],'040':[48.21,16.37],'112':[53.90,27.57],'056':[50.85,4.35],
+  '070':[43.85,18.36],'100':[42.70,23.32],'191':[45.81,15.98],'196':[35.17,33.37],
+  '203':[50.09,14.42],'208':[55.68,12.57],'233':[59.44,24.75],'246':[60.17,24.94],
+  '250':[48.85,2.35],'276':[52.52,13.41],'300':[37.98,23.73],'348':[47.50,19.04],
+  '352':[64.14,-21.94],'372':[53.33,-6.25],'380':[41.90,12.49],'428':[56.95,24.11],
+  '440':[54.69,25.28],'442':[49.61,6.13],'470':[35.90,14.51],'498':[47.01,28.86],
+  '499':[42.44,19.26],'528':[52.37,4.90],'807':[41.99,21.43],'578':[59.91,10.75],
+  '616':[52.23,21.01],'620':[38.72,-9.14],'642':[44.43,26.10],'643':[55.75,37.62],
+  '688':[44.80,20.46],'703':[48.15,17.11],'705':[46.05,14.51],'724':[40.42,-3.70],
+  '752':[59.33,18.07],'756':[46.95,7.45],'804':[50.45,30.52],'826':[51.51,-0.13],
+  '304':[64.18,-51.74],
+  '012':[36.74,3.06],'024':[-8.84,13.23],'204':[6.37,2.42],'072':[-24.65,25.91],
+  '854':[12.37,-1.52],'108':[-3.38,29.36],'120':[3.87,11.52],'140':[4.36,18.56],
+  '148':[12.11,15.04],'178':[-4.27,15.28],'384':[6.82,-5.27],'180':[-4.32,15.32],
+  '262':[11.59,43.15],'226':[3.75,8.78],'232':[15.34,38.93],'231':[9.03,38.74],
+  '266':[0.39,9.45],'270':[13.45,-16.58],'288':[5.55,-0.20],'324':[9.54,-13.68],
+  '624':[11.86,-15.60],'404':[-1.29,36.82],'426':[-29.32,27.48],'430':[6.30,-10.80],
+  '434':[32.90,13.18],'450':[-18.91,47.54],'454':[-13.97,33.79],'466':[12.65,-8.00],
+  '478':[18.08,-15.97],'504':[34.02,-6.85],'508':[-25.97,32.59],'516':[-22.56,17.08],
+  '562':[13.51,2.12],'566':[9.07,7.40],'646':[-1.95,30.06],'686':[14.73,-17.47],
+  '694':[8.49,-13.23],'706':[2.05,45.34],'710':[-25.74,28.19],'728':[4.86,31.57],
+  '729':[15.55,32.53],'834':[-6.18,35.74],'768':[6.14,1.22],'788':[36.82,10.18],
+  '800':[0.32,32.58],'894':[-15.42,28.28],'716':[-17.83,31.05],
+  '818':[30.06,31.25],'364':[35.69,51.42],'368':[33.34,44.40],'376':[31.77,35.21],
+  '400':[31.95,35.93],'414':[29.37,47.98],'422':[33.89,35.50],'512':[23.61,58.59],
+  '275':[31.90,35.20],'634':[25.29,51.53],'682':[24.69,46.72],'760':[33.51,36.29],
+  '784':[24.47,54.37],'887':[15.35,44.21],
+  '004':[34.53,69.17],'051':[40.18,44.51],'031':[40.41,49.87],'050':[23.72,90.41],
+  '064':[27.47,89.64],'096':[4.94,114.95],'116':[11.57,104.92],'156':[39.91,116.39],
+  '268':[41.69,44.83],'356':[28.64,77.22],'360':[-6.21,106.85],'392':[35.69,139.69],
+  '398':[51.18,71.45],'417':[42.87,74.59],'418':[17.97,102.60],'458':[3.15,101.70],
+  '496':[47.91,106.92],'104':[19.79,96.16],'524':[27.71,85.32],'554':[-41.29,174.78],
+  '408':[39.02,125.75],'410':[37.57,126.98],'586':[33.72,73.04],'598':[-9.44,147.18],
+  '608':[14.60,120.98],'702':[1.29,103.85],'144':[6.90,79.86],'158':[25.05,121.53],
+  '762':[38.56,68.77],'764':[13.75,100.52],'626':[-8.56,125.58],'792':[39.93,32.86],
+  '795':[37.95,58.38],'860':[41.30,69.27],'704':[21.03,105.85],'242':[-18.14,178.44],
+  '036':[-35.31,149.12],
+};
 let score = 0, round = 0, streak = 0, attempts = 0;
 let currentId = '', questionPool = [], geoIndex = {}, gameOver = false;
 let pendingTimeout = null;
 
 const mapWrap = document.getElementById('map-wrap');
 const svgEl   = document.getElementById('world-svg');
-let W, H, projection, pathGen, zoomBehavior, mapGroup;
+let W, H, projection, pathGen, zoomBehavior, mapGroup, capDotGroup;
+let dotIndex = {};  // id → { g, core, ring } SVG elements
 
 function initMap() {
   W = mapWrap.clientWidth;
@@ -507,6 +569,11 @@ function initMap() {
       mapGroup.selectAll('.border').style('stroke-width', (0.5 / k) + 'px');
       mapGroup.selectAll('.country-bg').style('stroke-width', (0.5 / k) + 'px');
       mapGroup.selectAll('[stroke="#7aaecc"]').style('stroke-width', (0.6 / k) + 'px');
+      // Counter-scale each dot group so dots stay pixel-constant at all zoom levels
+      mapGroup.selectAll('.cap-dot').attr('transform', function() {
+        const tx = this.getAttribute('data-tx'), ty = this.getAttribute('data-ty');
+        return `translate(${tx},${ty}) scale(${1/k})`;
+      });
     })
     .on('start', () => mapWrap.classList.add('dragging'))
     .on('end',   () => mapWrap.classList.remove('dragging'));
@@ -560,6 +627,106 @@ function zoomToCountry(id) {
   zoomToBox(x0, y0, x1, y1, 700);
 }
 
+// ── Capital dot layer ─────────────────────────────────────────────────────────
+function buildCapitalDots() {
+  dotIndex = {};
+  Object.entries(CAPITAL_COORDS).forEach(([id, [lat, lng]]) => {
+    const [px, py] = projection([lng, lat]);
+    if (!isFinite(px) || !isFinite(py)) return;
+
+    const g = capDotGroup.append('g')
+      .attr('class', 'cap-dot')
+      .attr('data-id', id)
+      .attr('data-tx', px)
+      .attr('data-ty', py)
+      .attr('transform', `translate(${px},${py})`);
+
+    // Expanding ring (pulse animation — transform:scale via CSS class)
+    const ring = g.append('circle')
+      .attr('class', 'dot-ring')
+      .attr('r', 5)
+      .attr('fill', 'none')
+      .attr('stroke', '#e8a020')
+      .attr('stroke-width', 1.5)
+      .attr('opacity', 0);
+
+    // Invisible hit-area circle — larger target for easier clicking
+    g.append('circle')
+      .attr('r', 7)
+      .attr('fill', 'none')
+      .attr('stroke', 'none')
+      .attr('pointer-events', 'all');
+
+    // Visible core dot
+    const core = g.append('circle')
+      .attr('class', 'dot-core')
+      .attr('r', 4)
+      .attr('fill', '#e8a020')
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 1);
+
+    g.on('click', (event) => {
+      event.stopPropagation();
+      handleDotClick(id);
+    });
+
+    dotIndex[id] = { g, core, ring };
+  });
+  showCapitalDots(false); // hidden by default
+}
+
+// Show or hide the entire dot layer, and set pointer-events accordingly
+function showCapitalDots(visible) {
+  capDotGroup.attr('visibility', visible ? 'visible' : 'hidden');
+  capDotGroup.selectAll('.cap-dot').classed('clickable', visible);
+}
+
+// Set a dot's visual state: 'idle' | 'target' | 'correct' | 'wrong'
+const DOT_COLORS = { idle: '#e8a020', target: '#e8a020', correct: '#3b6d11', wrong: '#a32d2d' };
+function setDotState(id, state) {
+  const entry = dotIndex[id];
+  if (!entry) return;
+  const isClickable = capDotGroup.select('.cap-dot').classed('clickable');
+  entry.g.attr('class', `cap-dot${state !== 'idle' ? ' ' + state : ''}${isClickable ? ' clickable' : ''}`);
+  // Drive fill directly so state is visible regardless of CSS specificity
+  const color = DOT_COLORS[state] || '#e8a020';
+  entry.core.attr('fill', color);
+  entry.ring.attr('stroke', color)
+    .attr('opacity', state === 'target' ? null : 0);  // null lets CSS animation control it
+}
+
+// Reset all dots to idle state
+function resetDots() {
+  Object.keys(dotIndex).forEach(id => setDotState(id, 'idle'));
+}
+
+// Zoom to a capital dot's projected position
+function zoomToDot(id) {
+  const coords = CAPITAL_COORDS[id];
+  if (!coords) return;
+  const [px, py] = projection([coords[1], coords[0]]);
+  if (!isFinite(px) || !isFinite(py)) return;
+  const scale = Math.min(8, 0.15);  // comfortable zoom for a point
+  d3.select(svgEl).transition().duration(700)
+    .call(zoomBehavior.transform,
+      d3.zoomIdentity.translate(W / 2, H / 2).scale(8).translate(-px, -py));
+}
+
+function handleDotClick(id) {
+  if (mode !== 'click' || subject !== 'capital' || gameOver) return;
+  if (id === currentId) {
+    setDotState(id, 'correct');
+    awardCorrect(id);
+  } else {
+    attempts++;
+    setDotState(id, 'wrong');
+    if (attempts >= MAX_ATTEMPTS) { markFail(); return; }
+    const left = MAX_ATTEMPTS - attempts;
+    setFeedback(`Wrong! ${left} attempt${left===1?'':'s'} left.`, 'bad');
+    updateHUD();
+  }
+}
+
 async function loadMap() {
   initMap();
   const world = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json');
@@ -608,6 +775,10 @@ async function loadMap() {
     .attr('class','border')
     .attr('d', pathGen);
 
+  // Capital dot layer — above country paths, counter-scaled per zoom
+  capDotGroup = mapGroup.append('g').attr('id', 'cap-dots');
+  buildCapitalDots();
+
   initIdle();
 }
 
@@ -650,6 +821,7 @@ function startGame() {
   document.getElementById('scoreboard').classList.remove('show');
   document.getElementById('total-disp').textContent = ROUNDS;
   zoomToRegion(region, 400);
+  if (dotIndex) showCapitalDots(false); // nextRound will show them if needed
   updateHUD();
   nextRound();
 }
@@ -661,6 +833,7 @@ function resetClasses() {
   Object.entries(geoIndex).forEach(([id, {path}]) => {
     path.attr('class', inRegion && !inRegion.has(id) ? 'country dimmed' : 'country');
   });
+  resetDots();
 }
 
 function nextRound() {
@@ -675,18 +848,25 @@ function nextRound() {
   const capitalName = CAPITALS[currentId];
 
   if (mode === 'click') {
-    // click+country: "Find and click: France"
-    // click+capital: "Capital is Paris — click its country"
-    const prompt = subject === 'capital'
-      ? `Capital is ${capitalName} — click its country`
-      : `Find and click: ${countryName}`;
-    document.getElementById('prompt-text').textContent = prompt;
-    document.getElementById('name-row').style.display = 'none';
-    document.getElementById('skip-btn').style.display = '';
-    zoomToRegion(region, 400);
+    if (subject === 'capital') {
+      // click+capital: show all dots as idle (no pulse — player must find it)
+      // zoom to region so player searches the map, not handed the answer
+      document.getElementById('prompt-text').textContent = `Find the capital: ${capitalName}`;
+      document.getElementById('name-row').style.display = 'none';
+      document.getElementById('skip-btn').style.display = '';
+      showCapitalDots(true);
+      zoomToRegion(region, 400);
+    } else {
+      // click+country: "Find and click: France" — no dots
+      showCapitalDots(false);
+      document.getElementById('prompt-text').textContent = `Find and click: ${countryName}`;
+      document.getElementById('name-row').style.display = 'none';
+      document.getElementById('skip-btn').style.display = '';
+      zoomToRegion(region, 400);
+    }
   } else {
-    // name+country: "Which country is highlighted?" (orange country)
-    // name+capital: "What is the capital of France?" (orange country, type capital)
+    // name+country: country highlighted → type name; no dots
+    // name+capital: country highlighted → type capital; show all dots, pulse target
     if (geoIndex[currentId]) geoIndex[currentId].path.attr('class','country target');
     const prompt = subject === 'capital'
       ? `What is the capital of ${countryName}?`
@@ -699,7 +879,14 @@ function nextRound() {
     document.getElementById('skip-btn').style.display = 'none';
     document.getElementById('guess-input').value = '';
     setTimeout(() => document.getElementById('guess-input').focus(), 50);
-    zoomToCountry(currentId);
+    if (subject === 'capital') {
+      showCapitalDots(true);
+      setDotState(currentId, 'target');
+      zoomToCountry(currentId);
+    } else {
+      showCapitalDots(false);
+      zoomToCountry(currentId);
+    }
   }
 }
 
@@ -862,8 +1049,21 @@ function awardCorrect(id) {
 
 // Show the correct country after a wrong answer or skip:
 // zooms it into view (always, regardless of size) then pulses it for 3 s.
+// Also pulses the capital dot when in a capital mode.
 function revealCountry(id) {
   if (geoIndex[id]) geoIndex[id].path.attr('class', 'country reveal');
+
+  // Also mark the dot as target (pulsing) for capital modes
+  if (subject === 'capital') {
+    showCapitalDots(true);
+    setDotState(id, 'target');
+  }
+
+  if (subject === 'capital' && mode === 'click') {
+    // In click+capital mode the country wasn't highlighted — zoom to the dot
+    zoomToDot(id);
+    return;
+  }
 
   // Zoom to fit — use a gentler max scale (6) so small countries aren't over-zoomed,
   // and always zoom even if the country is tiny (no bw/bh guard here).
@@ -970,9 +1170,11 @@ function setMode(m) {
   // Show/hide lookup panel
   if (isLookup) {
     document.getElementById('scoreboard').classList.remove('show');
+    if (dotIndex) showCapitalDots(true);   // dots always visible in lookup for reference
     showLookup();
   } else {
     hideLookup();
+    if (dotIndex) showCapitalDots(false);  // hidden until a game round needs them
   }
 
   // Idle welcome state — map loaded, nothing started yet
@@ -1035,6 +1237,7 @@ function clearLookupHighlight() {
   if (lookupHighlightedId) {
     const entry = geoIndex[lookupHighlightedId];
     if (entry) entry.path.attr('class', 'country');
+    setDotState(lookupHighlightedId, 'idle');
     lookupHighlightedId = null;
   }
 }
@@ -1154,12 +1357,13 @@ function handleLookupKey(e) {
 function performLookup(id) {
   // Clear previous highlight across the whole map
   Object.values(geoIndex).forEach(({ path }) => path.attr('class', 'country'));
+  resetDots();
 
   lookupHighlightedId = id;
   revealCountry(id);
-  const region = COUNTRY_REGIONS[id];
+  setDotState(id, 'target');   // pulse the capital dot too
   const capital = CAPITALS[id];
-  lookupFeedback.textContent = `${COUNTRIES[id]} · Capital: ${capital} · ${region}`;
+  lookupFeedback.textContent = `${COUNTRIES[id]} · Capital: ${capital} · ${COUNTRY_REGIONS[id]}`;
   lookupFeedback.style.color = '#0f6e56';
 }
 
