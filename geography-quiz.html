@@ -517,6 +517,8 @@ const CAPITAL_COORDS = {
 let score = 0, round = 0, streak = 0, attempts = 0;
 let currentId = '', questionPool = [], geoIndex = {}, gameOver = false;
 let pendingTimeout = null;
+let locked = false;       // true between round outcome and next round starting
+let clickCooldown = false; // brief debounce after any wrong click
 
 const mapWrap = document.getElementById('map-wrap');
 const svgEl   = document.getElementById('world-svg');
@@ -713,11 +715,13 @@ function zoomToDot(id) {
 }
 
 function handleDotClick(id) {
-  if (mode !== 'click' || subject !== 'capital' || gameOver) return;
+  if (mode !== 'click' || subject !== 'capital' || gameOver || locked || clickCooldown) return;
   if (id === currentId) {
     setDotState(id, 'correct');
     awardCorrect(id);
   } else {
+    clickCooldown = true;
+    setTimeout(() => { clickCooldown = false; }, 300);
     attempts++;
     setDotState(id, 'wrong');
     if (attempts >= MAX_ATTEMPTS) { markFail(); return; }
@@ -802,6 +806,7 @@ function setRegion(r) {
 
 function startGame() {
   clearTimeout(pendingTimeout); pendingTimeout = null;
+  locked = false; clickCooldown = false;
   hideLookup();
   score = 0; round = 0; streak = 0; attempts = 0; gameOver = false;
   // Grey out lookup during game; restore game chrome visibility
@@ -837,6 +842,8 @@ function resetClasses() {
 }
 
 function nextRound() {
+  locked = false;
+  clickCooldown = false;
   if (round >= ROUNDS) { endGame(); return; }
   resetClasses();
   attempts = 0;
@@ -891,11 +898,13 @@ function nextRound() {
 }
 
 function handleMapClick(id) {
-  if (mode !== 'click' || gameOver) return;
+  if (mode !== 'click' || gameOver || locked || clickCooldown) return;
   if (id === currentId) {
     if (geoIndex[id]) geoIndex[id].path.attr('class','country correct');
     awardCorrect(id);
   } else {
+    clickCooldown = true;
+    setTimeout(() => { clickCooldown = false; }, 300);
     attempts++;
     if (geoIndex[id]) geoIndex[id].path.attr('class','country wrong');
     if (attempts >= MAX_ATTEMPTS) { markFail(); return; }
@@ -1017,7 +1026,7 @@ function isCorrectCapital(guess, targetId) {
 }
 
 function checkName() {
-  if (mode !== 'name' || gameOver) return;
+  if (mode !== 'name' || gameOver || locked) return;
   const val = document.getElementById('guess-input').value.trim();
   if (!val) return;
   const correct = subject === 'capital'
@@ -1038,6 +1047,7 @@ function checkName() {
 }
 
 function awardCorrect(id) {
+  locked = true;
   const pts = attempts === 0 ? PTS_FIRST : PTS_LATER;
   score += pts; streak++;
   let bonus = 0;
@@ -1091,6 +1101,7 @@ function revealCountry(id) {
 }
 
 function markFail() {
+  locked = true;
   streak = 0;
   revealCountry(currentId);
   const answer = subject === 'capital'
@@ -1102,6 +1113,7 @@ function markFail() {
 }
 
 function skipQuestion() {
+  locked = true;
   streak = 0;
   revealCountry(currentId);
   const answer = subject === 'capital'
